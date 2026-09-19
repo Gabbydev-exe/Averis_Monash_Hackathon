@@ -1,14 +1,15 @@
 # Shipping API deployment starter
 
-This starter verifies Java-to-container-to-Cloud Run deployment. It does not yet
-implement Gemini, document comparison, authentication, or PostgreSQL.
+This starter verifies Java-to-container-to-Cloud Run deployment. It now supports
+Cloud SQL for MySQL; follow [MYSQL_SETUP.md](MYSQL_SETUP.md) to enable it.
+Gemini, document comparison, and user authentication are not implemented yet.
 
 ## Local Java run (PowerShell)
 
 Requires JDK 25. Maven is downloaded by the included wrapper.
 
 ```powershell
-cd C:\Users\111\Desktop\hackerthon\backend
+cd C:\Users\111\Desktop\hackerthon\backend\backend
 .\mvnw.cmd verify
 $env:PORT = "8081"
 .\mvnw.cmd spring-boot:run

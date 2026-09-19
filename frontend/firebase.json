@@ -1,0 +1,16 @@
+{
+  "hosting": {
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      { "source": "/api/**", "headers": [{ "key": "Cache-Control", "value": "no-store" }] }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": { "serviceId": "shipping-api", "region": "asia-southeast1" }
+      },
+      { "source": "**", "destination": "/index.html" }
+    ]
+  }
+}
