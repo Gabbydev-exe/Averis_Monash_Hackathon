@@ -8,6 +8,7 @@ const searchQuery = ref('')
 const selectedFilter = ref('all')
 const selectedEmailId = ref(1)
 const isVerifying = ref(false)
+const mobileView = ref('list') // 'list' | 'detail'
 
 const emails = ref([
   {
@@ -151,6 +152,7 @@ const currentEmail = computed(() => {
 function selectEmail(email) {
   selectedEmailId.value = email.id
   email.unread = false
+  mobileView.value = 'detail'
 }
 
 function runVerification() {
@@ -220,10 +222,35 @@ function flagDiscrepancy() {
       </div>
     </div>
 
+    <!-- Mobile View Switcher (Tabs visible on mobile/tablet screens) -->
+    <div class="mobile-view-tabs" role="tablist" aria-label="Mobile View Selector">
+      <button
+        type="button"
+        :class="['mobile-tab-btn', { active: mobileView === 'list' }]"
+        role="tab"
+        :aria-selected="mobileView === 'list'"
+        @click="mobileView = 'list'"
+      >
+        📬 Emails ({{ filteredEmails.length }})
+      </button>
+      <button
+        type="button"
+        :class="['mobile-tab-btn', { active: mobileView === 'detail' }]"
+        role="tab"
+        :aria-selected="mobileView === 'detail'"
+        @click="mobileView = 'detail'"
+      >
+        📄 Document Details
+      </button>
+    </div>
+
     <!-- Main Workspace: Inbox List + Detail Verification Panel -->
     <div class="inbox-layout">
       <!-- Left: Email List -->
-      <section class="inbox-sidebar" aria-label="Email list">
+      <section
+        :class="['inbox-sidebar', { 'is-mobile-active': mobileView === 'list', 'is-mobile-hidden': mobileView !== 'list' }]"
+        aria-label="Email list"
+      >
         <div class="sidebar-controls">
           <input
             v-model="searchQuery"
@@ -294,7 +321,21 @@ function flagDiscrepancy() {
       </section>
 
       <!-- Right: Document Verification Detail -->
-      <section v-if="currentEmail" class="inbox-detail" aria-label="Email and Verification Detail">
+      <section
+        v-if="currentEmail"
+        :class="['inbox-detail', { 'is-mobile-active': mobileView === 'detail', 'is-mobile-hidden': mobileView !== 'detail' }]"
+        aria-label="Email and Verification Detail"
+      >
+        <!-- Mobile Back Button -->
+        <button
+          type="button"
+          class="mobile-back-btn"
+          @click="mobileView = 'list'"
+          aria-label="Back to Email List"
+        >
+          ← Back to Email List
+        </button>
+
         <!-- Email Header Banner -->
         <div class="detail-header">
           <div class="detail-title-section">
@@ -368,6 +409,10 @@ function flagDiscrepancy() {
             <div class="vessel-badge">
               <span>🚢 Vessel: <strong>{{ currentEmail.vessel }}</strong></span>
             </div>
+          </div>
+
+          <div class="table-scroll-hint" aria-hidden="true">
+            <span>↔ Swipe horizontally to view full SI vs B/L comparison</span>
           </div>
 
           <div class="table-container">
