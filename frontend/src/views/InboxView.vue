@@ -319,20 +319,23 @@ function flagDiscrepancy() {
             >
               {{ isVerifying ? 'Verifying Documents…' : '⚡ Run Verification' }}
             </button>
-            <button
-              type="button"
-              class="btn-approve"
-              @click="approveMatch"
-            >
-              ✓ Approve
-            </button>
-            <button
-              type="button"
-              class="btn-flag"
-              @click="flagDiscrepancy"
-            >
-              ⚠ Flag Issue
-            </button>
+
+            <div class="flag-approve-btn-group">
+              <button
+                type="button"
+                class="btn-approve"
+                @click="approveMatch"
+              >
+                ✓ Approve
+              </button>
+              <button
+                type="button"
+                class="btn-flag"
+                @click="flagDiscrepancy"
+              >
+                ⚠ Flag Issue
+              </button>
+            </div>
           </div>
         </div>
 
