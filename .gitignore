@@ -5,3 +5,7 @@
 /.idea/inspectionProfiles/Project_Default.xml
 /.idea/vcs.xml
 /.idea/workspace.xml
+/frontend/src/views/HomeView.vue
+/frontend/src/views/InboxView.vue
+/frontend/src/router/index.js
+/.ai/mcp/mcp.json
