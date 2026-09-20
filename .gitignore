@@ -9,3 +9,5 @@
 /frontend/src/views/InboxView.vue
 /frontend/src/router/index.js
 /.ai/mcp/mcp.json
+.idea/workspace.xml
+*.xml
