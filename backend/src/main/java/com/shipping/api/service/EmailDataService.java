@@ -1,13 +1,14 @@
 package com.shipping.api.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shipping.api.model.EmailAttachmentDto;
 import com.shipping.api.model.EmailDetailDto;
 import com.shipping.api.model.EmailFieldDto;
 import com.shipping.api.model.EmailSummaryDto;
+import com.shipping.api.repository.EmailRepository;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
@@ -16,7 +17,6 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
@@ -38,6 +38,7 @@ public class EmailDataService {
     );
 
     private final ObjectMapper objectMapper;
+    private final Optional<EmailRepository> emailRepository;
     private final ResourcePatternResolver resourceResolver = new PathMatchingResourcePatternResolver();
 
     private final Map<String, EmailDetailDto> emailDetailMap = new ConcurrentHashMap<>();
@@ -47,7 +48,14 @@ public class EmailDataService {
         this(new ObjectMapper());
     }
 
+    @Autowired
+    public EmailDataService(Optional<EmailRepository> emailRepository) {
+        this.objectMapper = new ObjectMapper();
+        this.emailRepository = emailRepository;
+    }
+
     public EmailDataService(ObjectMapper objectMapper) {
+        this.emailRepository = Optional.empty();
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
@@ -57,6 +65,10 @@ public class EmailDataService {
     }
 
     public synchronized void loadEmailsAndReports() {
+        if (emailRepository.isPresent()) {
+            log.info("Email API uses MySQL; bundled inbox JSON is not loaded");
+            return;
+        }
         emailDetailMap.clear();
         emailSummaryList.clear();
 
@@ -219,29 +231,76 @@ public class EmailDataService {
     }
 
     public List<EmailSummaryDto> getAllEmailSummaries() {
+        if (emailRepository.isPresent()) {
+            return emailRepository.get().findAll().stream()
+                    .sorted(Comparator.comparingInt((EmailRepository.EmailRow row) -> extractIndex(row.id()))
+                            .thenComparing(EmailRepository.EmailRow::id))
+                    .map(row -> new EmailSummaryDto(
+                            row.id(), row.sender(), extractSenderName(row.sender(), row.body()),
+                            row.subject(), "Received", "pending",
+                            extractBookingNumber(row.subject(), row.body(), row.id()), row.attachmentCount()))
+                    .toList();
+        }
         return Collections.unmodifiableList(emailSummaryList);
     }
 
     public Optional<EmailDetailDto> getEmailDetail(String id) {
+        if (emailRepository.isPresent()) {
+            return emailRepository.get().findById(id).map(this::toDatabaseDetail);
+        }
         return Optional.ofNullable(emailDetailMap.get(id));
     }
 
-    public Optional<byte[]> getAttachmentContent(String attachmentPathOrFilename) {
-        try {
-            String filename = attachmentPathOrFilename.contains("/")
-                    ? attachmentPathOrFilename.substring(attachmentPathOrFilename.lastIndexOf('/') + 1)
-                    : attachmentPathOrFilename;
+    private EmailDetailDto toDatabaseDetail(EmailRepository.EmailRow row) {
+        List<EmailAttachmentDto> attachments = emailRepository.orElseThrow().findAttachments(row.id()).stream()
+                .map(attachment -> new EmailAttachmentDto(
+                        attachment.filename(), attachment.sourcePath(), detectAttachmentType(attachment.filename()),
+                        formatAttachmentSize(attachment.byteSize())))
+                .toList();
+        // This stage reads source data only. AI results and review persistence are separate work.
+        List<EmailFieldDto> fields = STANDARD_FIELD_LABELS.stream()
+                .map(label -> new EmailFieldDto(label, "Pending", "Pending", "pending", null))
+                .toList();
+        return new EmailDetailDto(
+                row.id(), row.sender(), extractSenderName(row.sender(), row.body()), row.subject(),
+                "Received", "pending", extractBookingNumber(row.subject(), row.body(), row.id()),
+                "Pending extraction", "Pending extraction", "Pending extraction", row.body(), attachments, fields);
+    }
 
-            Resource resource = resourceResolver.getResource("classpath:data/bundle/attachments/" + filename);
-            if (resource.exists()) {
-                try (InputStream is = resource.getInputStream()) {
-                    return Optional.of(is.readAllBytes());
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load attachment content for {}: {}", attachmentPathOrFilename, e.getMessage());
+    private String formatAttachmentSize(long bytes) {
+        if (bytes == 0) return "0 B";
+        if (bytes > 1024 * 1024) {
+            return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0));
         }
-        return Optional.empty();
+        return Math.max(1, bytes / 1024) + " KB";
+    }
+
+    public Optional<byte[]> getAttachmentContent(String emailId, String filename) {
+        if (filename == null || filename.contains("/") || filename.contains("\\")
+                || filename.contains("\r") || filename.contains("\n") || filename.contains("\"")) {
+            return Optional.empty();
+        }
+        // Resolve only attachments belonging to the requested email, in either data mode.
+        return getEmailDetail(emailId)
+                .flatMap(detail -> detail.attachments().stream()
+                        .filter(attachment -> attachment.name().equals(filename)).findFirst())
+                .flatMap(attachment -> readBundleAttachment(attachment.path()));
+    }
+
+    private Optional<byte[]> readBundleAttachment(String sourcePath) {
+        if (sourcePath == null || !sourcePath.startsWith("attachments/") || sourcePath.contains("\\")
+                || sourcePath.indexOf('\0') >= 0
+                || Arrays.stream(sourcePath.split("/", -1)).anyMatch(part ->
+                        part.isEmpty() || part.equals(".") || part.equals(".."))) {
+            return Optional.empty();
+        }
+        Resource resource = resourceResolver.getResource("classpath:data/bundle/" + sourcePath);
+        try (InputStream stream = resource.getInputStream()) {
+            return Optional.of(stream.readAllBytes());
+        } catch (java.io.IOException exception) {
+            log.warn("Registered attachment is unavailable in bundle ({})", exception.getClass().getSimpleName());
+            return Optional.empty();
+        }
     }
 
     private int extractIndex(String id) {

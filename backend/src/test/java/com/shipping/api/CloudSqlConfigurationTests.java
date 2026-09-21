@@ -1,6 +1,8 @@
 package com.shipping.api;
 
 import com.zaxxer.hikari.HikariDataSource;
+import com.shipping.api.repository.EmailRepository;
+import org.springframework.context.ApplicationContext;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,9 +20,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CloudSqlConfigurationTests {
     @Autowired HikariDataSource dataSource;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ApplicationContext context;
 
     @Test
     void bindsCloudConnectorSettingsWithoutOpeningANetworkConnection() {
+        assertThat(context.getBeansOfType(EmailRepository.class)).hasSize(1);
         assertThat(jdbc.getDataSource()).isSameAs(dataSource);
         assertThat(dataSource.getJdbcUrl()).isEqualTo("jdbc:mysql:///configuration_test");
         assertThat(dataSource.getUsername()).isEqualTo("test_user");

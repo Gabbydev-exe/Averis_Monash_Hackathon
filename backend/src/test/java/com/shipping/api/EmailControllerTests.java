@@ -78,4 +78,19 @@ class EmailControllerTests {
         ResponseEntity<byte[]> response = emailController.getAttachmentContent("email_004", "non_existent.txt");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
+
+    @Test
+    void shouldRejectAttachmentOwnedByAnotherEmail() {
+        assertThat(emailController.getAttachmentContent("email_003", "email_004_SI.txt").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void shouldReturnSafe503ForDatabaseFailure() {
+        var response = emailController.databaseUnavailable(
+                new org.springframework.dao.DataAccessResourceFailureException("private-password-details"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).containsEntry("status", "unavailable");
+        assertThat(response.getBody().toString()).doesNotContain("private-password-details");
+    }
 }
