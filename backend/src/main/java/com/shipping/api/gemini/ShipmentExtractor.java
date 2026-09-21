@@ -14,6 +14,10 @@ public class ShipmentExtractor {
         {
           "type": "object",
           "properties": {
+          "document_type": {
+                    "type": "string",
+                    "enum": ["SI", "BL", "OTHER"]
+                  },
             "shipper": {
               "type": "string",
               "nullable": true
@@ -44,6 +48,7 @@ public class ShipmentExtractor {
             }
           },
           "required": [
+            "document_type",
             "shipper",
             "consignee",
             "notify_party",
@@ -56,7 +61,16 @@ public class ShipmentExtractor {
         """;
 
         String prompt = """
-                Extract exactly these seven shipment fields from this document:
+                First identify the document type, then extract exactly these seven shipment fields.
+                
+                document_type must be exactly one of:
+                - SI: Shipping Instruction
+                - BL: Bill of Lading
+                - OTHER: the document is neither a Shipping Instruction nor a Bill of Lading
+                
+                Determine document_type from the document content, not from the filename.
+                
+                Extract:
 
                 - shipper
                 - consignee
@@ -103,6 +117,9 @@ public class ShipmentExtractor {
                 - Gross Weight重(KGS)
 
                 Rules:
+                - Determine document_type only from the document content.
+                - Do not assume the document type from a filename or attachment label.
+                - If the document is not clearly a Shipping Instruction or Bill of Lading, use OTHER.
                 - Match different labels that clearly refer to the same field.
                 - Extract only values explicitly present in the document.
                 - Never guess or invent a value.

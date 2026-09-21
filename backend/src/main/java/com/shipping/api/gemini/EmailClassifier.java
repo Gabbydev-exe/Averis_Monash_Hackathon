@@ -12,20 +12,20 @@ public class EmailClassifier {
         String prompt = """
             Classify this email into exactly ONE of these five categories:
 
-            DOCUMENT_COMPARISON
-            NEW_SI_REQUEST
+            BL_COMPARISON
+            SI_REQUEST
             INVOICE_QUERY
             GENERAL
             SPAM
 
             Category meanings:
 
-            DOCUMENT_COMPARISON:
+            BL_COMPARISON:
             The email asks to check, compare, verify, or review shipping
             documents, especially a Shipping Instruction (SI) against
             a Bill of Lading (BL).
 
-            NEW_SI_REQUEST:
+            SI_REQUEST:
             The email asks for a new Shipping Instruction to be prepared
             or created.
 
@@ -61,8 +61,8 @@ public class EmailClassifier {
 
     private String validateCategory(String category) {
         return switch (category) {
-            case "DOCUMENT_COMPARISON",
-                 "NEW_SI_REQUEST",
+            case "BL_COMPARISON",
+                 "SI_REQUEST",
                  "INVOICE_QUERY",
                  "GENERAL",
                  "SPAM" -> category;

@@ -95,25 +95,200 @@ class WorkflowPersistenceTests {
         service.saveAttachment("pipeline", "BL.txt", "BL stored in MySQL".getBytes());
         var seen = new ArrayList<String>();
         var processor = new com.shipping.api.gemini.DataProcessor(service, email -> {
-            assertThat(email.bodyText()).isEqualTo("Verify"); return "DOCUMENT_COMPARISON";
+            assertThat(email.bodyText()).isEqualTo("Verify"); return "BL_COMPARISON";
         }, text -> {
             seen.add(text);
-            return "{\"shipper\":\"Company\",\"consignee\":\"Company\",\"notify_party\":\"Company\",\"port_of_loading\":\"Singapore\",\"port_of_discharge\":\"Klang\",\"container_count\":2,\"gross_weight_kg\":2000}";
+
+            String documentType = text.equals("SI stored in MySQL")
+                    ? "SI"
+                    : "BL";
+
+            return """
+            {
+              "document_type":"%s",
+              "shipper":"Company",
+              "consignee":"Company",
+              "notify_party":"Company",
+              "port_of_loading":"Singapore",
+              "port_of_discharge":"Klang",
+              "container_count":2,
+              "gross_weight_kg":2000
+            }
+            """.formatted(documentType);
         });
-        assertThat(processor.process("pipeline").path("status").asText()).isEqualTo("verified");
+
+        var result = processor.process("pipeline");
+        assertThat(result.path("status").asText()).isEqualTo("OK");
+        assertThat(result.path("has_defect").asBoolean()).isFalse();
+        assertThat(result.path("defect_fields").isEmpty()).isTrue();
+        assertThat(result.path("review_reason").isNull()).isTrue();
         assertThat(seen).containsExactly("SI stored in MySQL", "BL stored in MySQL");
         var restarted = new EmailDataService(new EmailRepository(jdbc));
         assertThat(restarted.workflow("pipeline").fields()).hasSize(7);
-        assertThat(restarted.workflow("pipeline").category()).isEqualTo("DOCUMENT_COMPARISON");
+        assertThat(restarted.workflow("pipeline").category()).isEqualTo("BL_COMPARISON");
         assertThat(restarted.workflow("pipeline").fields()).allMatch(f -> f.siEvidence() == null);
     }
     @Test void pipelineFailureNeverClaimsSavedExtractionAndMissingBytesNeedReview() {
         var failed = new com.shipping.api.gemini.DataProcessor(service, email -> { throw new RuntimeException("AI unavailable"); }, text -> "{}");
         assertThatThrownBy(() -> failed.process("saved")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         assertThat(service.workflow("saved").revision()).isEqualTo("none");
-        var missing = new com.shipping.api.gemini.DataProcessor(service, email -> "DOCUMENT_COMPARISON", text -> { throw new AssertionError("No attachment bytes should be read"); });
-        assertThat(missing.process("saved").path("status").asText()).isEqualTo("pending");
+        var missing = new com.shipping.api.gemini.DataProcessor(service, email -> "BL_COMPARISON", text -> { throw new AssertionError("No attachment bytes should be read"); });
+        var missingResult = missing.process("saved");
+        assertThat(missingResult.path("status").asText()).isEqualTo("NEEDS_REVIEW");
+        assertThat(missingResult.path("has_defect").asBoolean()).isFalse();
+        assertThat(missingResult.path("defect_fields").isEmpty()).isTrue();
+        assertThat(missingResult.path("review_reason").asText()).isEqualTo("missing_attachment");
         assertThat(service.workflow("saved").fields()).hasSize(7).allMatch(f -> f.si() == null && f.bl() == null);
+    }
+
+    @Test void pipelineReportsMismatchAndDefectFields() throws Exception {
+        var source = Map.of(
+                "email_id", "mismatch",
+                "from", "sender@example.com",
+                "subject", "Compare",
+                "body", "Verify",
+                "attachments", List.of(
+                        "attachments/SI.txt",
+                        "attachments/BL.txt"));
+
+        service.importJson(mapper.writeValueAsBytes(source));
+        service.saveAttachment("mismatch", "SI.txt", "SI document".getBytes());
+        service.saveAttachment("mismatch", "BL.txt", "BL document".getBytes());
+
+        var processor = new com.shipping.api.gemini.DataProcessor(
+                service,
+                email -> "BL_COMPARISON",
+                text -> {
+                    if (text.equals("SI document")) {
+                        return """
+                            {
+                            "document_type":"SI",
+                              "shipper":"Company",
+                              "consignee":"Buyer",
+                              "notify_party":"Agent",
+                              "port_of_loading":"Singapore",
+                              "port_of_discharge":"Klang",
+                              "container_count":2,
+                              "gross_weight_kg":2000
+                            }
+                            """;
+                    }
+
+                    return """
+                        {
+                        "document_type":"BL",
+                          "shipper":"Company",
+                          "consignee":"Buyer",
+                          "notify_party":"Agent",
+                          "port_of_loading":"Singapore",
+                          "port_of_discharge":"Klang",
+                          "container_count":2,
+                          "gross_weight_kg":2500
+                        }
+                        """;
+                });
+
+        var result = processor.process("mismatch");
+
+        assertThat(result.path("status").asText()).isEqualTo("MISMATCH");
+        assertThat(result.path("has_defect").asBoolean()).isTrue();
+        assertThat(result.path("defect_fields").size()).isEqualTo(1);
+        assertThat(result.path("defect_fields").get(0).asText())
+                .isEqualTo("gross_weight_kg");
+        assertThat(result.path("review_reason").isNull()).isTrue();
+    }
+
+    @Test void pipelineReportsUnreadableAttachmentForReview() throws Exception {
+        var source = Map.of(
+                "email_id", "unreadable",
+                "from", "sender@example.com",
+                "subject", "Compare",
+                "body", "Verify",
+                "attachments", List.of(
+                        "attachments/SI.txt",
+                        "attachments/BL.txt"));
+
+        service.importJson(mapper.writeValueAsBytes(source));
+
+        service.saveAttachment(
+                "unreadable",
+                "SI.txt",
+                new byte[] {(byte) 0xC3, (byte) 0x28});
+
+        service.saveAttachment(
+                "unreadable",
+                "BL.txt",
+                "Valid BL document".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        var processor = new com.shipping.api.gemini.DataProcessor(
+                service,
+                email -> "BL_COMPARISON",
+                text -> """
+                    {
+                      "shipper":"Company",
+                      "consignee":"Buyer",
+                      "notify_party":"Agent",
+                      "port_of_loading":"Singapore",
+                      "port_of_discharge":"Klang",
+                      "container_count":2,
+                      "gross_weight_kg":2000
+                    }
+                    """);
+
+        var result = processor.process("unreadable");
+
+        assertThat(result.path("status").asText()).isEqualTo("NEEDS_REVIEW");
+        assertThat(result.path("has_defect").asBoolean()).isFalse();
+        assertThat(result.path("defect_fields").isEmpty()).isTrue();
+        assertThat(result.path("review_reason").asText()).isEqualTo("unreadable");
+    }
+
+    @Test void pipelineReportsWrongDocumentTypeForReview() throws Exception {
+        var source = Map.of(
+                "email_id", "wrong-type",
+                "from", "sender@example.com",
+                "subject", "Compare",
+                "body", "Verify",
+                "attachments", List.of(
+                        "attachments/SI.txt",
+                        "attachments/BL.txt"));
+
+        service.importJson(mapper.writeValueAsBytes(source));
+        service.saveAttachment("wrong-type", "SI.txt", "Actually a BL".getBytes());
+        service.saveAttachment("wrong-type", "BL.txt", "Valid BL".getBytes());
+
+        var processor = new com.shipping.api.gemini.DataProcessor(
+                service,
+                email -> "BL_COMPARISON",
+                text -> {
+                    String documentType = text.equals("Actually a BL")
+                            ? "BL"
+                            : "BL";
+
+                    return """
+                        {
+                          "document_type":"%s",
+                          "shipper":"Company",
+                          "consignee":"Buyer",
+                          "notify_party":"Agent",
+                          "port_of_loading":"Singapore",
+                          "port_of_discharge":"Klang",
+                          "container_count":2,
+                          "gross_weight_kg":2000
+                        }
+                        """.formatted(documentType);
+                });
+
+        var result = processor.process("wrong-type");
+
+        assertThat(result.path("status").asText())
+                .isEqualTo("NEEDS_REVIEW");
+        assertThat(result.path("has_defect").asBoolean())
+                .isFalse();
+        assertThat(result.path("defect_fields").isEmpty())
+                .isTrue();
+        assertThat(result.path("review_reason").asText())
+                .isEqualTo("wrong_doc_type");
     }
 
     @Test void numericFormattingDoesNotCreateFalseMismatch() {
