@@ -26,12 +26,7 @@ public class EmailWorkflow {
     }
     private TransactionTemplate transaction() { return new TransactionTemplate(new JdbcTransactionManager(Objects.requireNonNull(jdbc.getDataSource()))); }
     public static String fieldStatus(Field f) {
-        if (f.si() == null || f.bl() == null || f.si().isBlank() || f.bl().isBlank()) return "pending";
-        if (List.of("container_count", "gross_weight_kg").contains(f.key())) {
-            try { return new java.math.BigDecimal(f.si().strip()).compareTo(new java.math.BigDecimal(f.bl().strip())) == 0 ? "match" : "mismatch"; }
-            catch (NumberFormatException invalidNumber) { return "pending"; }
-        }
-        return f.si().strip().replaceAll("\\s+", " ").equalsIgnoreCase(f.bl().strip().replaceAll("\\s+", " ")) ? "match" : "mismatch";
+        return com.shipping.api.service.ShipmentComparison.status(f.key(), f.si(), f.bl());
     }
     public Map<String, String> statuses() {
         return transaction().execute(tx -> {

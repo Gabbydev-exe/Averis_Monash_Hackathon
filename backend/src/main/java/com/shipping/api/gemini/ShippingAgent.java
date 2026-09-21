@@ -283,13 +283,11 @@ public class ShippingAgent {
                     );
                 }
 
-                String siText =
-                        normalise(siValue);
-
-                String blText =
-                        normalise(blValue);
-
-                if (!siText.equalsIgnoreCase(blText)) {
+                String siText = siValue.asText();
+                String blText = blValue.asText();
+                String status = com.shipping.api.service.ShipmentComparison.status(field, siText, blText);
+                if (status.equals("pending")) return Map.of("result", "REVIEW_REQUIRED: Missing or invalid field '" + field + "'.");
+                if (status.equals("mismatch")) {
                     mismatches.add(
                             field
                                     + " | SI: "

@@ -107,7 +107,15 @@ public class ShipmentExtractor {
                 - Extract only values explicitly present in the document.
                 - Never guess or invent a value.
                 - If a required field is missing, return null.
-                - Preserve the value from the document.
+                - shipper, consignee and notify_party mean the party NAME ONLY.
+                - Exclude postal addresses, building/floor/unit details, postal codes,
+                  telephone/fax numbers, email addresses and contact-person details from names.
+                - Preserve the complete company name, including its legal suffix and
+                  meaningful branch/division name. Never shorten different companies to a shared prefix.
+                - For example, "MOORIM SP CO., LTD" followed by an address starting
+                  "656, GANGNAM-DAERO" must return "MOORIM SP CO., LTD" only.
+                - Address differences are not part of the seven required comparison fields.
+                - Preserve each field's value from the document within the scope above.
                 - container_count must be the numeric number of containers.
                 - gross_weight_kg must be the numeric gross weight in kilograms.
                 - Ignore other fields such as vessel, voyage number, description,
