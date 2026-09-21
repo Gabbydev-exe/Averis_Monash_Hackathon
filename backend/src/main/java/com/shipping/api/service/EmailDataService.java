@@ -6,6 +6,8 @@ import com.shipping.api.model.EmailAttachmentDto;
 import com.shipping.api.model.EmailDetailDto;
 import com.shipping.api.model.EmailFieldDto;
 import com.shipping.api.model.EmailSummaryDto;
+import com.shipping.api.document.AttachmentTextReader;
+import com.shipping.api.document.AttachmentTextResult;
 import com.shipping.api.repository.EmailRepository;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,7 @@ public class EmailDataService {
     private final ObjectMapper objectMapper;
     private final Optional<EmailRepository> emailRepository;
     private final ResourcePatternResolver resourceResolver = new PathMatchingResourcePatternResolver();
+    private final AttachmentTextReader attachmentTextReader = new AttachmentTextReader();
 
     private final Map<String, EmailDetailDto> emailDetailMap = new ConcurrentHashMap<>();
     private final List<EmailSummaryDto> emailSummaryList = new ArrayList<>();
@@ -285,6 +288,11 @@ public class EmailDataService {
                 .flatMap(detail -> detail.attachments().stream()
                         .filter(attachment -> attachment.name().equals(filename)).findFirst())
                 .flatMap(attachment -> readBundleAttachment(attachment.path()));
+    }
+
+    public Optional<AttachmentTextResult> getAttachmentText(String emailId, String filename) {
+        return getAttachmentContent(emailId, filename)
+                .map(bytes -> attachmentTextReader.read(filename, bytes));
     }
 
     private Optional<byte[]> readBundleAttachment(String sourcePath) {

@@ -1,6 +1,7 @@
 package com.shipping.api;
 
 import com.shipping.api.controller.EmailController;
+import com.shipping.api.document.AttachmentReadStatus;
 import com.shipping.api.repository.EmailRepository;
 import com.shipping.api.service.EmailDataService;
 import org.h2.jdbcx.JdbcDataSource;
@@ -110,6 +111,15 @@ class DatabaseEmailIntegrationTests {
         var response = controller.getAttachmentContent("email_004", "email_004_SI.txt");
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(new String(response.getBody(), StandardCharsets.UTF_8)).contains("SHIPPING INSTRUCTION");
+    }
+
+    @Test
+    void extractsRegisteredAttachmentTextInDatabaseMode() {
+        var response = controller.getAttachmentText("email_004", "email_004_SI.txt");
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().status()).isEqualTo(AttachmentReadStatus.OK);
+        assertThat(response.getBody().text()).contains("SHIPPING INSTRUCTION");
     }
 
     @Test
