@@ -1,0 +1,562 @@
+{
+  "purpose": "Manually checked development/evaluation cases created only from the participant bundle; no organizer answer key used.",
+  "case_count": 25,
+  "category_counts": {
+    "BL_COMPARISON": 10,
+    "SI_REQUEST": 4,
+    "INVOICE_QUERY": 4,
+    "GENERAL": 4,
+    "SPAM": 3
+  },
+  "review_reason_coverage": [
+    "wrong_doc_type",
+    "missing_attachment",
+    "unreadable",
+    "missing_value"
+  ],
+  "notes": [
+    "For non-BL categories, only classification is applicable.",
+    "For NEEDS_REVIEW cases, do not invent missing/unreadable values.",
+    "Field checks use semantic field alignment, not exact label-text matching."
+  ],
+  "cases": [
+    {
+      "case_id": "TC01",
+      "email_id": "email_001",
+      "difficulty": "normal",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "OK",
+        "review_reason": null,
+        "has_defect": false,
+        "defect_fields": []
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FAR EAST (M) SDN BHD",
+          "bl": "APRIL FAR EAST (M) SDN BHD",
+          "match": true
+        },
+        "consignee": {
+          "si": "MOORIM SP CO., LTD",
+          "bl": "MOORIM SP CO., LTD",
+          "match": true
+        },
+        "notify_party": {
+          "si": "UAB NOVAKOPA",
+          "bl": "UAB NOVAKOPA",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "PORT KLANG (WESTPORT), MALAYSIA (MYPKG)",
+          "bl": "PORT KLANG (WESTPORT), MALAYSIA (MYPKG)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "CALLAO, PERU (PECLL)",
+          "bl": "CALLAO, PERU (PECLL)",
+          "match": true
+        },
+        "container_count": {
+          "si": 1,
+          "bl": 1,
+          "match": true
+        },
+        "gross_weight_kg": {
+          "si": 21577,
+          "bl": 21577,
+          "match": true
+        }
+      },
+      "manual_reason": "Email explicitly asks to check SI against draft BL; all seven compared fields agree."
+    },
+    {
+      "case_id": "TC02",
+      "email_id": "email_004",
+      "difficulty": "normal_mismatch",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "MISMATCH",
+        "review_reason": null,
+        "has_defect": true,
+        "defect_fields": [
+          "consignee",
+          "notify_party"
+        ]
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FAR EAST (M) SDN BHD",
+          "bl": "APRIL FAR EAST (M) SDN BHD",
+          "match": true
+        },
+        "consignee": {
+          "si": "EAST BRIGHT FZ-LLC",
+          "bl": "UAB NOVAKOPA",
+          "match": false
+        },
+        "notify_party": {
+          "si": "EAST BRIGHT FZ-LLC",
+          "bl": "UAB NOVAKOPA",
+          "match": false
+        },
+        "port_of_loading": {
+          "si": "NANTONG, CHINA (CNNTG)",
+          "bl": "NANTONG, CHINA (CNNTG)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "KARACHI, PAKISTAN (PKKHI)",
+          "bl": "KARACHI, PAKISTAN (PKKHI)",
+          "match": true
+        },
+        "container_count": {
+          "si": 6,
+          "bl": 6,
+          "match": true
+        },
+        "gross_weight_kg": {
+          "si": 131058,
+          "bl": 131058,
+          "match": true
+        }
+      },
+      "manual_reason": "Consignee and notify party differ; the other five required fields match."
+    },
+    {
+      "case_id": "TC03",
+      "email_id": "email_013",
+      "difficulty": "normal_mismatch",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "MISMATCH",
+        "review_reason": null,
+        "has_defect": true,
+        "defect_fields": [
+          "port_of_discharge"
+        ]
+      },
+      "field_check": {
+        "shipper": {
+          "si": "ASIA PACIFIC PAPERBOARD TRADING PTE LTD",
+          "bl": "ASIA PACIFIC PAPERBOARD TRADING PTE LTD",
+          "match": true
+        },
+        "consignee": {
+          "si": "ROXCEL TRADING GMBH",
+          "bl": "ROXCEL TRADING GMBH",
+          "match": true
+        },
+        "notify_party": {
+          "si": "ROXCEL TRADING GMBH",
+          "bl": "ROXCEL TRADING GMBH",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "SINGAPORE (SGSIN)",
+          "bl": "SINGAPORE (SGSIN)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "MOMBASA, KENYA (KEMBA)",
+          "bl": "TUTICORIN, INDIA (KEMBA)",
+          "match": false
+        },
+        "container_count": {
+          "si": 3,
+          "bl": 3,
+          "match": true
+        },
+        "gross_weight_kg": {
+          "si": 67311,
+          "bl": 67311,
+          "match": true
+        }
+      },
+      "manual_reason": "The discharge-port text conflicts even though the BL retains the same parenthetical code."
+    },
+    {
+      "case_id": "TC04",
+      "email_id": "email_025",
+      "difficulty": "multiple_mismatches",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "MISMATCH",
+        "review_reason": null,
+        "has_defect": true,
+        "defect_fields": [
+          "port_of_discharge",
+          "container_count"
+        ]
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FAR EAST (M) SDN BHD",
+          "bl": "APRIL FAR EAST (M) SDN BHD",
+          "match": true
+        },
+        "consignee": {
+          "si": "CERIEX",
+          "bl": "CERIEX",
+          "match": true
+        },
+        "notify_party": {
+          "si": "ROXCEL TRADING GMBH",
+          "bl": "ROXCEL TRADING GMBH",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "PORT KLANG (WESTPORT), MALAYSIA (MYPKG)",
+          "bl": "PORT KLANG (WESTPORT), MALAYSIA (MYPKG)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "FREMANTLE, AUSTRALIA (AUFRE)",
+          "bl": "BUSAN, SOUTH KOREA (AUFRE)",
+          "match": false
+        },
+        "container_count": {
+          "si": 6,
+          "bl": 5,
+          "match": false
+        },
+        "gross_weight_kg": {
+          "si": 135126,
+          "bl": 135126,
+          "match": true
+        }
+      },
+      "manual_reason": "Both discharge port and container count differ."
+    },
+    {
+      "case_id": "TC05",
+      "email_id": "email_031",
+      "difficulty": "multiple_mismatches",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "MISMATCH",
+        "review_reason": null,
+        "has_defect": true,
+        "defect_fields": [
+          "container_count",
+          "gross_weight_kg"
+        ]
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FINE PAPER TRADING (MIDDLE EAST) FZE",
+          "bl": "APRIL FINE PAPER TRADING (MIDDLE EAST) FZE",
+          "match": true
+        },
+        "consignee": {
+          "si": "VITAL SOLUTIONS PTE. LTD.",
+          "bl": "VITAL SOLUTIONS PTE. LTD.",
+          "match": true
+        },
+        "notify_party": {
+          "si": "VITAL SOLUTIONS PTE. LTD.",
+          "bl": "VITAL SOLUTIONS PTE. LTD.",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "NHAVA SHEVA, INDIA (INNSA)",
+          "bl": "NHAVA SHEVA, INDIA (INNSA)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "MOMBASA, KENYA (KEMBA)",
+          "bl": "MOMBASA, KENYA (KEMBA)",
+          "match": true
+        },
+        "container_count": {
+          "si": 1,
+          "bl": 3,
+          "match": false
+        },
+        "gross_weight_kg": {
+          "si": 21114,
+          "bl": 23114,
+          "match": false
+        }
+      },
+      "manual_reason": "Container count and gross weight differ; all other required fields agree."
+    },
+    {
+      "case_id": "TC06",
+      "email_id": "email_032",
+      "difficulty": "normal",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "OK",
+        "review_reason": null,
+        "has_defect": false,
+        "defect_fields": []
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FAR EAST (M) SDN BHD",
+          "bl": "APRIL FAR EAST (M) SDN BHD",
+          "match": true
+        },
+        "consignee": {
+          "si": "TOPKOPY MIDDLE EAST FZE",
+          "bl": "TOPKOPY MIDDLE EAST FZE",
+          "match": true
+        },
+        "notify_party": {
+          "si": "TOPKOPY MIDDLE EAST FZE",
+          "bl": "TOPKOPY MIDDLE EAST FZE",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "RUGAO/NANTONG/SHANGHAI, CHINA (CNSHA)",
+          "bl": "RUGAO/NANTONG/SHANGHAI, CHINA (CNSHA)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "KARACHI, PAKISTAN (PKKHI)",
+          "bl": "KARACHI, PAKISTAN (PKKHI)",
+          "match": true
+        },
+        "container_count": {
+          "si": 3,
+          "bl": 3,
+          "match": true
+        },
+        "gross_weight_kg": {
+          "si": 64092,
+          "bl": 64092,
+          "match": true
+        }
+      },
+      "manual_reason": "Different field labels are used across SI/BL, but the seven semantic values match."
+    },
+    {
+      "case_id": "TC07",
+      "email_id": "email_501",
+      "difficulty": "human_review",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "NEEDS_REVIEW",
+        "review_reason": "wrong_doc_type",
+        "has_defect": null,
+        "defect_fields": []
+      },
+      "field_check": null,
+      "manual_reason": "The email requests SI-vs-BL checking, but the second attachment is a Commercial Invoice, not a draft BL."
+    },
+    {
+      "case_id": "TC08",
+      "email_id": "email_507",
+      "difficulty": "human_review",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "NEEDS_REVIEW",
+        "review_reason": "missing_attachment",
+        "has_defect": null,
+        "defect_fields": []
+      },
+      "field_check": null,
+      "manual_reason": "The email requests SI-vs-BL checking but only the SI attachment exists; the draft BL is missing."
+    },
+    {
+      "case_id": "TC09",
+      "email_id": "email_511",
+      "difficulty": "human_review",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "NEEDS_REVIEW",
+        "review_reason": "unreadable",
+        "has_defect": null,
+        "defect_fields": []
+      },
+      "field_check": null,
+      "manual_reason": "The BL attachment is a malformed/corrupt PDF; a PDF parser cannot read its xref/trailer."
+    },
+    {
+      "case_id": "TC10",
+      "email_id": "email_516",
+      "difficulty": "human_review",
+      "expected_category": "BL_COMPARISON",
+      "expected_comparison": {
+        "status": "NEEDS_REVIEW",
+        "review_reason": "missing_value",
+        "has_defect": null,
+        "defect_fields": []
+      },
+      "field_check": {
+        "shipper": {
+          "si": "APRIL FINE PAPER TRADING",
+          "bl": "APRIL FINE PAPER TRADING / ON BEHALF OF VITAL SOLUTIONS PTE LTD",
+          "match": null
+        },
+        "consignee": {
+          "si": "KPP-ANTALIS (SINGAPORE) PTE. LTD.",
+          "bl": "KPP-ANTALIS (SINGAPORE) PTE. LTD.",
+          "match": true
+        },
+        "notify_party": {
+          "si": "KPP-ANTALIS (SINGAPORE) PTE. LTD.",
+          "bl": "KPP-ANTALIS (SINGAPORE) PTE. LTD.",
+          "match": true
+        },
+        "port_of_loading": {
+          "si": "NHAVA SHEVA, INDIA",
+          "bl": "NHAVA SHEVA, INDIA (INNSA)",
+          "match": true
+        },
+        "port_of_discharge": {
+          "si": "CONAKRY, GUINEA",
+          "bl": "CONAKRY, GUINEA (GNCKY)",
+          "match": true
+        },
+        "container_count": {
+          "si": 10,
+          "bl": 10,
+          "match": true
+        },
+        "gross_weight_kg": {
+          "si": null,
+          "bl": 235550,
+          "match": null
+        }
+      },
+      "manual_reason": "The SI gives Gross Weight as N/A, so a required comparison value is missing and the case must not be guessed."
+    },
+    {
+      "case_id": "TC11",
+      "email_id": "email_007",
+      "difficulty": "normal",
+      "expected_category": "SI_REQUEST",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The message provides shipping-instruction details and requests the draft BL; there are no SI+BL attachments to compare."
+    },
+    {
+      "case_id": "TC12",
+      "email_id": "email_030",
+      "difficulty": "normal",
+      "expected_category": "SI_REQUEST",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The body contains shipment/SI details and asks for the draft BL to be returned."
+    },
+    {
+      "case_id": "TC13",
+      "email_id": "email_057",
+      "difficulty": "normal",
+      "expected_category": "SI_REQUEST",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The email provides a new set of shipping-instruction details rather than asking for SI-vs-BL verification."
+    },
+    {
+      "case_id": "TC14",
+      "email_id": "email_293",
+      "difficulty": "normal",
+      "expected_category": "SI_REQUEST",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The message supplies POL/POD/shipper/consignee/notify/container/weight information and asks for a draft BL."
+    },
+    {
+      "case_id": "TC15",
+      "email_id": "email_010",
+      "difficulty": "normal",
+      "expected_category": "INVOICE_QUERY",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "It explicitly asks whether THC/local charges are included in invoice 5250071354 and requests a breakdown."
+    },
+    {
+      "case_id": "TC16",
+      "email_id": "email_024",
+      "difficulty": "normal",
+      "expected_category": "INVOICE_QUERY",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The message concerns a missing GR for a specific invoice so billing can proceed."
+    },
+    {
+      "case_id": "TC17",
+      "email_id": "email_069",
+      "difficulty": "normal",
+      "expected_category": "INVOICE_QUERY",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The body asks for a missing GR to be posted for an invoice so billing can proceed."
+    },
+    {
+      "case_id": "TC18",
+      "email_id": "email_298",
+      "difficulty": "normal",
+      "expected_category": "INVOICE_QUERY",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The sender requests cancellation of invoice 5250070303 and reversal of PGI."
+    },
+    {
+      "case_id": "TC19",
+      "email_id": "email_012",
+      "difficulty": "misleading_subject",
+      "expected_category": "GENERAL",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "Although the subject mentions submitting SI, the actual body is only a vessel berthing report/operational update."
+    },
+    {
+      "case_id": "TC20",
+      "email_id": "email_037",
+      "difficulty": "normal",
+      "expected_category": "GENERAL",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "Operational delivery/loading update; it is not a comparison request, SI request, invoice query, or spam."
+    },
+    {
+      "case_id": "TC21",
+      "email_id": "email_053",
+      "difficulty": "misleading_subject",
+      "expected_category": "GENERAL",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "Despite an update-summary subject, the body is a general New Year/office-resumption announcement."
+    },
+    {
+      "case_id": "TC22",
+      "email_id": "email_194",
+      "difficulty": "keyword_trap",
+      "expected_category": "GENERAL",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "It contains the word Billing but is only an automated completion notification with 'No action required', not an invoice question."
+    },
+    {
+      "case_id": "TC23",
+      "email_id": "email_026",
+      "difficulty": "normal",
+      "expected_category": "SPAM",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "Unsolicited 90%-off logistics-software promotion with urgency/marketing language."
+    },
+    {
+      "case_id": "TC24",
+      "email_id": "email_116",
+      "difficulty": "misleading_subject",
+      "expected_category": "SPAM",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The subject advertises a Bitcoin investment; the body is a suspicious parcel-payment phishing message."
+    },
+    {
+      "case_id": "TC25",
+      "email_id": "email_417",
+      "difficulty": "misleading_subject",
+      "expected_category": "SPAM",
+      "expected_comparison": null,
+      "field_check": null,
+      "manual_reason": "The invoice-payment subject is misleading; the body is an unsolicited bank-officer scam asking for bank details."
+    }
+  ]
+}
