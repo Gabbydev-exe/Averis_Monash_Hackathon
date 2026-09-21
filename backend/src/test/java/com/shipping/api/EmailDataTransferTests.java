@@ -37,7 +37,8 @@ class EmailDataTransferTests {
                     source_path VARCHAR(512), attachment_order INT, file_name VARCHAR(255), mime_type VARCHAR(128),
                     byte_size BIGINT, sha256 CHAR(64))
                 """);
-        service = new EmailDataService(Optional.of(new EmailRepository(jdbc)));
+        DatabaseFixtures.workflow(jdbc);
+        service = new EmailDataService(new EmailRepository(jdbc));
         mvc = MockMvcBuilders.standaloneSetup(new EmailController(service)).build();
     }
 
@@ -158,7 +159,7 @@ class EmailDataTransferTests {
         assertThat(detail.attachments()).hasSize(2);
         assertThat(detail.attachments().get(1).size()).isEqualTo("Not uploaded");
         assertThat(service.getAttachmentContent("with_refs", "not_uploaded.pdf")).isEmpty();
-        assertThat(jdbc.queryForObject("SELECT sha256 FROM attachments WHERE file_name = 'email_004_SI.txt'", String.class)).hasSize(64);
+        assertThat(jdbc.queryForObject("SELECT TRIM(sha256) FROM attachments WHERE file_name = 'email_004_SI.txt'", String.class)).isEmpty();
         assertThat(jdbc.queryForObject("SELECT TRIM(sha256) FROM attachments WHERE file_name = 'not_uploaded.pdf'", String.class)).isEmpty();
     }
 
@@ -181,14 +182,13 @@ class EmailDataTransferTests {
         mvc.perform(get("/api/emails/export?format=xml")).andExpect(status().isBadRequest());
     }
 
-    @Test void noDatabaseModeUsesSameReaderAndExportsSessionData() throws Exception {
-        var local = new EmailDataService(new ObjectMapper());
-        local.initialize();
-        var source = email("local_import_001");
-        var result = local.importJson(json(source));
-        assertThat(result.storage()).isEqualTo("session");
-        assertThat(local.getEmailDetail("local_import_001").orElseThrow().bodyText()).isEqualTo(source.get("body"));
-        assertThat(local.exportSourceEmails()).hasSize(521);
-        assertThat(local.importJson(json(source)).skipped()).isEqualTo(1);
+    @Test void importsSurviveServiceRecreationAndDatabaseFailureNeverFallsBack() throws Exception {
+        service.importJson(json(email("persistent_email")));
+        var restarted = new EmailDataService(new EmailRepository(jdbc));
+        assertThat(restarted.getEmailDetail("persistent_email")).isPresent();
+        assertThat(restarted.exportSourceEmails()).hasSize(1);
+        jdbc.execute("DROP TABLE attachments");
+        assertThatThrownBy(() -> restarted.getAllEmailSummaries()).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        assertThatThrownBy(() -> new EmailDataService(null)).isInstanceOf(NullPointerException.class);
     }
 }

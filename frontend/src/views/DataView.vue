@@ -142,8 +142,7 @@ async function exportData(format) {
     <div v-if="error" class="data-alert data-error" role="alert">{{ error }}</div>
     <div v-if="result" class="data-alert data-success" role="status">
       <strong>{{ result.inserted }} imported · {{ result.skipped }} existing records skipped</strong>
-      <p v-if="result.storage === 'database'">Saved to the database. Existing emails and verification history were preserved.</p>
-      <p v-else>Saved for this backend session only. These imports will be lost when the server restarts; use database mode for permanent storage.</p>
+      <p>Saved to the database. Existing emails and verification history were preserved.</p>
       <router-link to="/inbox">View inbox →</router-link>
     </div>
 

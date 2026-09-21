@@ -36,17 +36,24 @@ class DatabaseEmailIntegrationTests {
         jdbc.execute("""
                 CREATE TABLE attachments (attachment_id VARCHAR(64) PRIMARY KEY,
                     email_id VARCHAR(64) REFERENCES emails(email_id), file_name VARCHAR(255),
-                    source_path VARCHAR(512), byte_size BIGINT, attachment_order INT)
+                    source_path VARCHAR(512), byte_size BIGINT, attachment_order INT, sha256 VARCHAR(64))
                 """);
+        DatabaseFixtures.workflow(jdbc);
         insertEmail("email_010", "Database-only subject", "Database-only body");
         insertEmail("email_004", "Café — 船", "First line\nO'Brien \\ documentation");
         // Insert BL first to prove order comes from attachment_order, not insertion order.
         insertAttachment("bl", "email_004_BL.txt", "attachments/email_004_BL.txt", 1, 1024);
         insertAttachment("si", "email_004_SI.txt", "attachments/email_004_SI.txt", 0, 702);
         repository = new EmailRepository(jdbc);
-        var service = new EmailDataService(Optional.of(repository));
-        service.initialize();
+        var service = new EmailDataService(repository);
+
         controller = new EmailController(service);
+        try {
+            for (var attachment : repository.findAttachments("email_004")) {
+                byte[] bytes = new org.springframework.core.io.ClassPathResource("data/bundle/" + attachment.sourcePath()).getContentAsByteArray();
+                jdbc.update("INSERT INTO attachment_contents VALUES (?, ?, ?)", "email_004", attachment.filename(), bytes);
+            }
+        } catch (java.io.IOException e) { throw new RuntimeException(e); }
     }
 
     @AfterEach
@@ -59,7 +66,7 @@ class DatabaseEmailIntegrationTests {
     }
 
     private void insertAttachment(String id, String filename, String path, int order, long bytes) {
-        jdbc.update("INSERT INTO attachments VALUES (?, ?, ?, ?, ?, ?)",
+        jdbc.update("INSERT INTO attachments (attachment_id, email_id, file_name, source_path, byte_size, attachment_order) VALUES (?, ?, ?, ?, ?, ?)",
                 id, "email_004", filename, path, bytes, order);
     }
 

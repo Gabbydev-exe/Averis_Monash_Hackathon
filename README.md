@@ -5,6 +5,15 @@
 
 ---
 
+## Current storage rollout
+
+The application now requires MySQL for source emails, attachments, extracted fields,
+and review decisions. There is no temporary `no-db` storage mode. **Apply the additive
+migration and explicitly seed existing attachment bytes before deploying this version**:
+[Database-only storage setup](backend/PERSISTENCE.md). JSON import/export and selected-email
+exports remain separate from AI processing. The Gemini processing route now uses POST
+and stores results; reviews save through the backend instead of browser-only state.
+
 ## 📌 Project Overview
 
 Logistics and shipping operations teams handle large volumes of emails daily containing transport paperwork. Operations personnel must manually review incoming messages, separate routine operational queries from document verification requests, and compare **Shipping Instructions (SI)** against draft **Bills of Lading (BL)**.

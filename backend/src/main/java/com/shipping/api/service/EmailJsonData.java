@@ -47,12 +47,14 @@ public final class EmailJsonData {
                 if (!email.path("attachments").isArray()) throw invalid(label + "attachments must be an array of existing document paths (or []).");
                 if (email.path("attachments").size() > 50) throw invalid(label + "at most 50 attachment references are allowed.");
                 Set<String> paths = new HashSet<>();
+                Set<String> filenames = new HashSet<>();
                 for (JsonNode attachment : email.path("attachments")) {
                     String path = attachment.asText();
                     if (!attachment.isTextual() || !path.startsWith("attachments/") || path.length() > 512
                             || path.contains("\\") || path.chars().anyMatch(c -> c < 32 || c == 127)
                             || Arrays.stream(path.split("/", -1)).anyMatch(p -> p.isEmpty() || p.equals(".") || p.equals(".."))
-                            || path.substring(path.lastIndexOf('/') + 1).length() > 255 || !paths.add(path)) {
+                            || path.substring(path.lastIndexOf('/') + 1).length() > 255 || !paths.add(path)
+                            || !filenames.add(path.substring(path.lastIndexOf('/') + 1).toLowerCase(Locale.ROOT))) {
                         throw invalid(label + "invalid or duplicate attachment reference.");
                     }
                 }

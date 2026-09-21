@@ -95,6 +95,35 @@ public class EmailController {
                 .body(Map.of("message", java.util.Objects.requireNonNullElse(exception.getReason(), "Invalid request.")));
     }
 
+    @GetMapping("/{id}/workflow")
+    public com.shipping.api.repository.EmailWorkflow.Snapshot workflow(@PathVariable String id) {
+        return emailDataService.workflow(id);
+    }
+
+    @PutMapping("/{id}/extraction")
+    public com.shipping.api.repository.EmailWorkflow.Snapshot saveExtraction(@PathVariable String id,
+            @RequestBody com.shipping.api.repository.EmailWorkflow.Extraction input) {
+        return emailDataService.saveExtraction(id, input);
+    }
+
+    @PostMapping("/{id}/reviews")
+    public com.shipping.api.repository.EmailWorkflow.Snapshot saveReview(@PathVariable String id,
+            @RequestBody com.shipping.api.repository.EmailWorkflow.Review input) {
+        return emailDataService.saveReview(id, input);
+    }
+
+    @PutMapping(value = "/{id}/attachments/{filename}", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<Void> saveAttachment(@PathVariable String id, @PathVariable String filename,
+                                              HttpServletRequest request) throws IOException {
+        if (request.getContentLengthLong() > EmailJsonData.MAX_BYTES)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Attachment must be at most 5 MB.");
+        byte[] bytes = request.getInputStream().readNBytes(EmailJsonData.MAX_BYTES + 1);
+        if (bytes.length > EmailJsonData.MAX_BYTES)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Attachment must be at most 5 MB.");
+        emailDataService.saveAttachment(id, filename, bytes);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<EmailDetailDto> getEmailById(@PathVariable String id) {
         return emailDataService.getEmailDetail(id)

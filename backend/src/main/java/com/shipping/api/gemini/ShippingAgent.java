@@ -7,8 +7,6 @@ import com.google.adk.tools.Annotations.Schema;
 import com.google.adk.tools.FunctionTool;
 import com.google.adk.web.AdkWebServer;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,12 +16,15 @@ public class ShippingAgent {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private static final String DATA_DIR =
-            System.getenv().getOrDefault(
-                    "SDOC_DATA_DIR",
-                    System.getProperty("user.home")
-                            + "/Downloads/sdoc-hackathon-bundle"
-            );
+    private static final String API_BASE = System.getenv().getOrDefault("SHIPPING_API_URL", "http://localhost:8081");
+    private static JsonNode get(String path) throws Exception {
+        var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(API_BASE + path))
+                .timeout(java.time.Duration.ofSeconds(30)).GET().build();
+        var response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) throw new IllegalStateException("Backend returned HTTP " + response.statusCode());
+        return MAPPER.readTree(response.body());
+    }
+    private static String segment(String value) { return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20"); }
 
     public static void main(String[] args) {
 
@@ -89,7 +90,7 @@ public class ShippingAgent {
                         - Never invent shipment information.
                         - Use the actual email and attachment contents as evidence.
                         - The attachment reader accepts filenames returned by
-                          listAttachments, including paths beginning with "attachments/".
+                          listAttachments, in email ID/filename format.
                         - Keep the final answer concise but include the category,
                           status, and comparison result.
                         """)
@@ -128,32 +129,8 @@ public class ShippingAgent {
             )
             String emailId
     ) {
-        try {
-            Path emailPath = Path.of(
-                    DATA_DIR,
-                    "inbox",
-                    emailId + ".json"
-            );
-
-            if (!Files.exists(emailPath)) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Email not found: " + emailId
-                );
-            }
-
-            return Map.of(
-                    "result",
-                    Files.readString(emailPath)
-            );
-
-        } catch (Exception e) {
-            return Map.of(
-                    "result",
-                    "REVIEW_REQUIRED: Could not read email: "
-                            + e.getMessage()
-            );
-        }
+        try { return Map.of("result", get("/api/emails/" + segment(emailId)).toString()); }
+        catch (Exception e) { return Map.of("result", "REVIEW_REQUIRED: Could not load persisted email."); }
     }
 
     @Schema(
@@ -169,52 +146,11 @@ public class ShippingAgent {
             String emailId
     ) {
         try {
-            Path attachmentsDir =
-                    Path.of(DATA_DIR, "attachments");
-
-            if (!Files.exists(attachmentsDir)) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Attachments directory not found."
-                );
-            }
-
             List<String> files = new ArrayList<>();
-
-            try (var stream = Files.list(attachmentsDir)) {
-                stream.filter(Files::isRegularFile)
-                        .filter(path ->
-                                path.getFileName()
-                                        .toString()
-                                        .startsWith(emailId + "_")
-                        )
-                        .forEach(path ->
-                                files.add(
-                                        path.getFileName().toString()
-                                )
-                        );
-            }
-
-            if (files.isEmpty()) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: No attachments found for "
-                                + emailId
-                );
-            }
-
-            return Map.of(
-                    "result",
-                    String.join("\n", files)
-            );
-
-        } catch (Exception e) {
-            return Map.of(
-                    "result",
-                    "REVIEW_REQUIRED: Could not list attachments: "
-                            + e.getMessage()
-            );
-        }
+            for (var attachment : get("/api/emails/" + segment(emailId)).path("attachments"))
+                files.add(emailId + "/" + attachment.path("name").asText());
+            return Map.of("result", String.join("\n", files));
+        } catch (Exception e) { return Map.of("result", "REVIEW_REQUIRED: Could not load persisted attachments."); }
     }
 
     @Schema(
@@ -231,77 +167,11 @@ public class ShippingAgent {
             String filename
     ) {
         try {
-            filename = filename
-                    .replace("\"", "")
-                    .trim()
-                    .replace("\\", "/");
-
-            while (filename.startsWith("attachments/")) {
-                filename = filename.substring(
-                        "attachments/".length()
-                );
-            }
-
-            Path attachmentPath = Path.of(
-                    DATA_DIR,
-                    "attachments",
-                    filename
-            ).normalize();
-
-            Path attachmentsRoot =
-                    Path.of(DATA_DIR, "attachments").normalize();
-
-            if (!attachmentPath.startsWith(attachmentsRoot)) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Invalid attachment path."
-                );
-            }
-
-            if (!Files.exists(attachmentPath)) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Attachment not found: "
-                                + filename
-                );
-            }
-
-            String lower = filename.toLowerCase();
-
-            if (lower.endsWith(".xlsx")
-                    || lower.endsWith(".xls")) {
-
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Excel attachment detected "
-                                + "but text extraction is not implemented yet: "
-                                + filename
-                );
-            }
-
-            String contents =
-                    Files.readString(attachmentPath);
-
-            if (contents.isBlank()) {
-                return Map.of(
-                        "result",
-                        "REVIEW_REQUIRED: Attachment is empty: "
-                                + filename
-                );
-            }
-
-            return Map.of(
-                    "result",
-                    contents
-            );
-
-        } catch (Exception e) {
-            return Map.of(
-                    "result",
-                    "REVIEW_REQUIRED: Could not read attachment: "
-                            + e.getMessage()
-            );
-        }
+            String[] parts = filename.split("/", 2);
+            if (parts.length != 2) return Map.of("result", "REVIEW_REQUIRED: Use the email ID/filename returned by listAttachments.");
+            var text = get("/api/emails/" + segment(parts[0]) + "/attachments/" + segment(parts[1]) + "/text");
+            return Map.of("result", text.path("status").asText().equals("OK") ? text.path("text").asText() : "REVIEW_REQUIRED: Attachment has no readable text.");
+        } catch (Exception e) { return Map.of("result", "REVIEW_REQUIRED: Could not read persisted attachment."); }
     }
 
     @Schema(

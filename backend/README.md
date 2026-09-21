@@ -2,12 +2,20 @@
 
 This starter verifies Java-to-container-to-Cloud Run deployment. It now supports
 Cloud SQL for MySQL; follow [MYSQL_SETUP.md](MYSQL_SETUP.md) to enable it.
-Gemini, document comparison, and user authentication are not implemented yet.
+The Gemini web pipeline reads database records and persists extracted values.
+Application user authentication is not implemented yet.
 
 Structured email JSON import and JSON/CSV export are available in the frontend's
 **Import / Export** tab. See [DATA_TRANSFER.md](DATA_TRANSFER.md) for formats,
 limits, persistence behavior, and API endpoints. The home route opens the inbox;
 a compact connection indicator appears at the upper left.
+
+## Database requirement
+
+Cloud SQL for MySQL is mandatory, including for local development. There is no local database option. Follow [PERSISTENCE.md](PERSISTENCE.md) for the required
+additive migration, explicit fixture/attachment import, configuration, and workflow APIs.
+The old no-db mode is removed; configure database credentials before running the commands below.
+Container smoke tests also require database configuration and access to those credentials.
 
 ## Local Java run (PowerShell)
 

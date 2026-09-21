@@ -2,142 +2,64 @@ package com.shipping.api.gemini;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.shipping.api.service.EmailDataService;
+import com.shipping.api.repository.EmailWorkflow;
+import com.shipping.api.document.AttachmentReadStatus;
+import com.shipping.api.model.EmailAttachmentDto;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+import java.util.*;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.stream.Stream;
-
+/** Processes only persisted emails and attachments, and saves the resulting extraction. */
 public class DataProcessor {
-
+    private final EmailDataService emails;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final EmailClassifier classifier = new EmailClassifier();
-    private final ShipmentExtractor extractor = new ShipmentExtractor();
-
-    private final Path datasetRoot;
-
-    public DataProcessor() {
-        String configuredPath = System.getenv("SDOC_DATA_DIR");
-
-        if (configuredPath == null || configuredPath.isBlank()) {
-            throw new RuntimeException(
-                    "SDOC_DATA_DIR environment variable is not set"
-            );
-        }
-
-        this.datasetRoot = Path.of(configuredPath);
+    private final java.util.function.Function<com.shipping.api.model.EmailDetailDto, String> classifier;
+    private final java.util.function.Function<String, String> extractor;
+    public DataProcessor(EmailDataService emails) {
+        this(emails, email -> new EmailClassifier().classify(email.id(), email.subject(), email.bodyText()),
+                text -> new ShipmentExtractor().extract(text));
     }
-
+    public DataProcessor(EmailDataService emails,
+            java.util.function.Function<com.shipping.api.model.EmailDetailDto, String> classifier,
+            java.util.function.Function<String, String> extractor) {
+        this.emails = emails; this.classifier = classifier; this.extractor = extractor;
+    }
     public JsonNode process(String emailId) {
-
+        String revision = emails.workflow(emailId).revision();
+        var email = emails.getEmailDetail(emailId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Email not found."));
+        String category;
+        JsonNode si = mapper.createObjectNode(), bl = mapper.createObjectNode();
         try {
-            Path emailFile =
-                    datasetRoot.resolve("inbox").resolve(emailId + ".json");
-
-            if (!Files.exists(emailFile)) {
-                throw new RuntimeException(
-                        "Email file not found: " + emailFile
-                );
+            category = classifier.apply(email);
+            if (category.equals("DOCUMENT_COMPARISON")) {
+                var sis = email.attachments().stream().filter(a -> a.type().equals("SI")).toList();
+                var bls = email.attachments().stream().filter(a -> a.type().equals("BL")).toList();
+                // Multiple candidates are ambiguous; keep missing values instead of choosing silently.
+                if (sis.size() == 1) si = extract(emailId, sis.get(0));
+                if (bls.size() == 1) bl = extract(emailId, bls.get(0));
             }
-
-            JsonNode email = mapper.readTree(emailFile.toFile());
-
-            String actualEmailId = email.path("email_id").asText(emailId);
-
-            String subject = email.path("subject").asText("");
-
-            String body =
-                    email.path("body").asText("");
-
-            String category =
-                    classifier.classify(actualEmailId, subject, body);
-
-            ObjectNode result = mapper.createObjectNode();
-
-            result.put("email_id", actualEmailId);
-            result.put("category", category);
-            result.put("subject", subject);
-
-            if (!category.equals("DOCUMENT_COMPARISON")) {
-                return result;
-            }
-
-            Path attachmentsDirectory =
-                    datasetRoot.resolve("attachments");
-
-            Path siFile = findAttachment(
-                    attachmentsDirectory,
-                    emailId + "_SI"
-            );
-
-            Path blFile = findAttachment(
-                    attachmentsDirectory,
-                    emailId + "_BL"
-            );
-
-            if (siFile == null || blFile == null) {
-
-                result.put("status", "REVIEW_REQUIRED");
-
-                if (siFile == null) {
-                    result.put("missing_si", true);
-                }
-
-                if (blFile == null) {
-                    result.put("missing_bl", true);
-                }
-
-                return result;
-            }
-
-            String siText = readTextAttachment(siFile);
-            String blText = readTextAttachment(blFile);
-
-            String siFields = extractor.extract(siText);
-            String blFields = extractor.extract(blText);
-
-            result.put("status", "PROCESSED");
-            result.set("si", mapper.readTree(siFields));
-            result.set("bl", mapper.readTree(blFields));
-
-            return result;
-
-        } catch (Exception e) {
-
-            throw new RuntimeException(
-                    "Failed to process email " + emailId +
-                            ": " + e.getMessage(),
-                    e
-            );
-        }
+        } catch (ResponseStatusException | org.springframework.dao.DataAccessException e) { throw e; }
+        catch (Exception e) { throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "AI processing failed. No extraction was saved; please retry."); }
+        var fields = new ArrayList<EmailWorkflow.Field>();
+        for (String key : EmailWorkflow.KEYS) fields.add(new EmailWorkflow.Field(key, value(si, key), value(bl, key), null, null));
+        var saved = emails.saveExtraction(emailId, new EmailWorkflow.Extraction("gemini-2.5-flash", fields, revision, category));
+        var result = mapper.createObjectNode();
+        result.put("email_id", emailId);
+        result.put("category", category);
+        result.put("status", saved.status());
+        result.put("revision", saved.revision());
+        result.set("si", si);
+        result.set("bl", bl);
+        return result;
     }
-
-    private Path findAttachment(
-            Path attachmentsDirectory,
-            String prefix
-    ) throws IOException {
-
-        if (!Files.exists(attachmentsDirectory)) {
-            return null;
-        }
-
-        try (Stream<Path> files = Files.walk(attachmentsDirectory)) {
-
-            return files.filter(Files::isRegularFile).filter(path -> path.getFileName().toString().
-                    startsWith(prefix)
-            ).findFirst().orElse(null);
-        }
+    private JsonNode extract(String id, EmailAttachmentDto attachment) throws Exception {
+        var text = emails.getAttachmentText(id, attachment.name());
+        if (text.isEmpty() || text.get().status() != AttachmentReadStatus.OK) return mapper.createObjectNode();
+        return mapper.readTree(extractor.apply(text.get().text()));
     }
-
-    private String readTextAttachment(Path file) throws IOException {
-
-        String filename =
-                file.getFileName().toString().toLowerCase();
-
-        if (!filename.endsWith(".txt")) {
-            throw new RuntimeException("Unsupported attachment format: " + file);
-        }
-        return Files.readString(file);
+    private String value(JsonNode document, String key) {
+        JsonNode value = document.get(key);
+        return value == null || value.isNull() ? null : value.asText();
     }
 }

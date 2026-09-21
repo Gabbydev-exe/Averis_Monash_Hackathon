@@ -1,6 +1,5 @@
 package com.shipping.api.repository;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
@@ -14,7 +13,6 @@ import org.springframework.dao.DuplicateKeyException;
 
 /** Reads the existing source tables; schema creation and imports remain separate. */
 @Repository
-@Profile("cloudsql")
 public class EmailRepository {
 
     private static final String EMAIL_SELECT = """
@@ -34,6 +32,35 @@ public class EmailRepository {
 
     public EmailRepository(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+    }
+
+    public EmailWorkflow workflow() { return new EmailWorkflow(jdbc); }
+
+    public boolean hasAttachmentContent(String emailId, String filename) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM attachment_contents WHERE email_id = ? AND file_name = ?", Integer.class, emailId, filename) > 0;
+    }
+    public Optional<byte[]> attachmentContent(String emailId, String filename) {
+        return jdbc.query("SELECT content FROM attachment_contents WHERE email_id = ? AND file_name = ?", (rs, n) -> rs.getBytes(1), emailId, filename).stream().findFirst();
+    }
+    public void saveAttachmentContent(String emailId, String filename, byte[] bytes) {
+        var tx = new TransactionTemplate(new JdbcTransactionManager(java.util.Objects.requireNonNull(jdbc.getDataSource())));
+        tx.executeWithoutResult(status -> {
+            if (jdbc.queryForList("SELECT email_id FROM emails WHERE email_id = ? FOR UPDATE", String.class, emailId).isEmpty()
+                    || findAttachments(emailId).stream().noneMatch(a -> a.filename().equals(filename)))
+                throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.NOT_FOUND, "Registered attachment not found.");
+            var previous = attachmentContent(emailId, filename);
+            if (previous.isPresent() && java.util.Arrays.equals(previous.get(), bytes)) return;
+            // Changed source bytes invalidate extraction and make old approvals historical.
+            jdbc.update("DELETE FROM shipment_fields WHERE email_id = ?", emailId);
+            jdbc.update("DELETE FROM email_extractions WHERE email_id = ?", emailId);
+            jdbc.update("INSERT INTO email_extractions (email_id, revision, model_name, category) VALUES (?, ?, ?, ?)", emailId, java.util.UUID.randomUUID().toString(), "Awaiting extraction after attachment update", "UNCLASSIFIED");
+            jdbc.update("DELETE FROM attachment_contents WHERE email_id = ? AND file_name = ?", emailId, filename);
+            jdbc.update("INSERT INTO attachment_contents (email_id, file_name, content) VALUES (?, ?, ?)", emailId, filename, bytes);
+            try {
+                String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes));
+                jdbc.update("UPDATE attachments SET byte_size = ?, sha256 = ? WHERE email_id = ? AND file_name = ?", bytes.length, hash, emailId, filename);
+            } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        });
     }
 
     public List<EmailRow> findAll() {

@@ -3,6 +3,7 @@ package com.shipping.api.gemini;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@org.springframework.context.annotation.Profile("gemini-demo")
 @RestController
 public class GeminiTestController {
 

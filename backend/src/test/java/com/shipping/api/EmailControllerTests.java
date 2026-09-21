@@ -17,14 +17,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EmailControllerTests {
 
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @org.junit.jupiter.api.AfterEach void close() { jdbc.execute("SHUTDOWN"); }
+
     private EmailDataService emailDataService;
     private EmailController emailController;
 
     @BeforeEach
-    void setUp() {
-        ObjectMapper objectMapper = new ObjectMapper();
-        emailDataService = new EmailDataService(objectMapper);
-        emailDataService.initialize();
+    void setUp() throws Exception {
+        var ds = new org.h2.jdbcx.JdbcDataSource();
+        ds.setURL("jdbc:h2:mem:" + java.util.UUID.randomUUID() + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
+        jdbc = new org.springframework.jdbc.core.JdbcTemplate(ds);
+        DatabaseFixtures.schema(jdbc);
+        emailDataService = new EmailDataService(new com.shipping.api.repository.EmailRepository(jdbc));
+        DatabaseFixtures.seedBundle(emailDataService);
         emailController = new EmailController(emailDataService);
     }
 

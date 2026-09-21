@@ -5,6 +5,10 @@ const searchQuery = ref('')
 const selectedFilter = ref('all')
 const selectedEmailId = ref(null)
 const isVerifying = ref(false)
+const workflow = ref(null)
+const reviewError = ref('')
+const reviewer = ref('')
+const reviewNote = ref('')
 const mobileView = ref('list') // 'list' | 'detail'
 
 const emails = ref([])
@@ -36,6 +40,10 @@ async function fetchEmailList() {
 
 async function selectEmailById(id) {
   selectedEmailId.value = id
+  currentDetail.value = null
+  workflow.value = null
+  reviewError.value = ''
+  reviewNote.value = ''
   const summary = emails.value.find(e => e.id === id)
   if (summary) {
     summary.unread = false
@@ -43,12 +51,18 @@ async function selectEmailById(id) {
   isLoadingDetail.value = true
   try {
     const res = await fetch(`/api/emails/${id}`)
+    if (!res.ok) throw new Error(`Could not load email (HTTP ${res.status}).`)
     if (res.ok) {
       const detail = await res.json()
+      if (selectedEmailId.value !== id) return
       currentDetail.value = detail
+      const saved = await fetch(`/api/emails/${id}/workflow`)
+      if (!saved.ok) throw new Error('Could not load saved verification and reviews.')
+      const data = await saved.json()
+      if (selectedEmailId.value === id) workflow.value = data
     }
   } catch (err) {
-    console.error('Failed to load email detail:', err)
+    reviewError.value = err.message || 'Could not load email details.'
   } finally {
     isLoadingDetail.value = false
   }
@@ -83,52 +97,49 @@ const filteredEmails = computed(() => {
   })
 })
 
-function runVerification() {
-  if (!currentDetail.value) return
+async function runVerification() {
+  if (!currentDetail.value || isVerifying.value) return
+  const id = currentDetail.value.id
   isVerifying.value = true
-  setTimeout(() => {
-    isVerifying.value = false
-    let hasMismatch = false
-    if (currentDetail.value.fields) {
-      currentDetail.value.fields.forEach(f => {
-        if (f.si !== 'Pending' && f.bl !== 'Pending' && f.si !== f.bl) {
-          f.status = 'mismatch'
-          hasMismatch = true
-        } else {
-          f.status = 'match'
-        }
-      })
+  reviewError.value = ''
+  try {
+    const response = await fetch(`/api/gemini/process/${id}`, { method: 'POST' })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.message || error.detail || 'AI processing failed. Please retry.')
     }
-    const newStatus = hasMismatch ? 'discrepancy' : 'verified'
-    currentDetail.value.status = newStatus
-    const item = emails.value.find(e => e.id === currentDetail.value.id)
-    if (item) {
-      item.status = newStatus
-    }
-  }, 900)
+    const saved = await response.json()
+    const item = emails.value.find(email => email.id === id)
+    if (item) item.status = saved.status
+    if (selectedEmailId.value === id) await selectEmailById(id)
+  } catch (error) { reviewError.value = error.message }
+  finally { isVerifying.value = false }
 }
 
-function approveMatch() {
-  if (!currentDetail.value) return
-  currentDetail.value.status = 'verified'
-  if (currentDetail.value.fields) {
-    currentDetail.value.fields.forEach(f => {
-      f.status = 'match'
+async function saveReview(decision) {
+  if (!currentDetail.value || !workflow.value || isVerifying.value) return
+  const id = currentDetail.value.id
+  isVerifying.value = true
+  reviewError.value = ''
+  try {
+    const response = await fetch(`/api/emails/${id}/reviews`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: workflow.value.revision, decision, reviewer: reviewer.value, note: reviewNote.value }),
     })
-  }
-  const item = emails.value.find(e => e.id === currentDetail.value.id)
-  if (item) {
-    item.status = 'verified'
-  }
-}
-
-function flagDiscrepancy() {
-  if (!currentDetail.value) return
-  currentDetail.value.status = 'discrepancy'
-  const item = emails.value.find(e => e.id === currentDetail.value.id)
-  if (item) {
-    item.status = 'discrepancy'
-  }
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}))
+      throw new Error(error.message || 'Review was not saved. Please retry.')
+    }
+    const saved = await response.json()
+    const item = emails.value.find(email => email.id === id)
+    if (item) item.status = saved.status
+    if (selectedEmailId.value === id) {
+      workflow.value = saved
+      currentDetail.value.status = saved.status
+      reviewNote.value = ''
+    }
+  } catch (error) { reviewError.value = error.message }
+  finally { isVerifying.value = false }
 }
 
 onMounted(() => {
@@ -311,30 +322,44 @@ onMounted(() => {
             <button
               type="button"
               class="btn-verify"
-              :disabled="isVerifying"
+              :disabled="isVerifying || isLoadingDetail"
               @click="runVerification"
             >
-              {{ isVerifying ? 'Verifying Documents…' : '⚡ Run Verification' }}
+              {{ isVerifying ? 'Processing…' : 'Run Verification' }}
             </button>
 
             <div class="flag-approve-btn-group">
               <button
                 type="button"
                 class="btn-approve"
-                @click="approveMatch"
+                :disabled="isVerifying || !workflow || !reviewer.trim() || !reviewNote.trim() || currentDetail.fields.some(field => field.status === 'pending')"
+                @click="saveReview('APPROVE')"
               >
                 ✓ Approve
               </button>
               <button
                 type="button"
                 class="btn-flag"
-                @click="flagDiscrepancy"
+                :disabled="isVerifying || !workflow || !reviewer.trim() || !reviewNote.trim()"
+                @click="saveReview('FLAG')"
               >
                 ⚠ Flag Issue
               </button>
             </div>
           </div>
         </div>
+
+        <section class="review-persistence" aria-label="Human review">
+          <p v-if="reviewError" role="alert">{{ reviewError }}</p>
+          <p v-if="isVerifying" role="status">Processing request…</p>
+          <label>Your name (self-reported)<input v-model="reviewer" maxlength="200" placeholder="Reviewer name" /></label>
+          <label>Review note<textarea v-model="reviewNote" maxlength="4000" placeholder="Explain your approval or flag" /></label>
+          <p>Decisions are saved to the database. Approval requires all seven SI and BL values. Human decisions do not change extracted evidence.</p>
+          <details v-if="workflow?.reviews.length">
+            <summary>Saved review history ({{ workflow.reviews.length }})</summary>
+            <p v-for="review in workflow.reviews" :key="review.id"><strong>{{ review.decision }} · {{ review.reviewer }}</strong> · {{ review.savedAt }}<br />{{ review.note }}<br /><small>{{ review.revision === workflow.revision ? 'Current extraction' : 'Previous extraction' }}</small></p>
+          </details>
+        </section>
 
         <!-- Document Attachments Bar -->
         <div class="attachments-card">
@@ -430,6 +455,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.review-persistence { margin: 16px 0; padding: 16px; border: 1px solid #dce4de; border-radius: 12px; font-size: 13px; }
+.review-persistence label { display: block; margin: 10px 0; }
+.review-persistence input, .review-persistence textarea { display: block; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #b7c9bd; border-radius: 6px; font: inherit; }
+.review-persistence p { line-height: 1.6; overflow-wrap: anywhere; }
+.review-persistence [role=alert] { color: #a23e32; }
+
 .inbox-page {
   max-width: 1400px;
   margin: 0 auto;
