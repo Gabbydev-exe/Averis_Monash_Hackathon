@@ -43,11 +43,9 @@ public class DataProcessor {
 
             JsonNode email = mapper.readTree(emailFile.toFile());
 
-            String actualEmailId =
-                    email.path("email_id").asText(emailId);
+            String actualEmailId = email.path("email_id").asText(emailId);
 
-            String subject =
-                    email.path("subject").asText("");
+            String subject = email.path("subject").asText("");
 
             String body =
                     email.path("body").asText("");

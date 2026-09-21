@@ -28,9 +28,7 @@ public class Vertex {
             return result.trim();
 
         } catch (Exception e) {
-            throw new RuntimeException(
-                    "Gemini request failed: " + e.getMessage(), e
-            );
+            throw new RuntimeException("Gemini request failed: " + e.getMessage(), e);
         }
     }
 

@@ -6,8 +6,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class GeminiTestController {
 
-    private final EmailClassifier emailClassifier =
-            new EmailClassifier();
+    private final EmailClassifier emailClassifier = new EmailClassifier();
 
     private final ShipmentExtractor shipmentExtractor =
             new ShipmentExtractor();
@@ -26,7 +25,9 @@ public class GeminiTestController {
                 Thanks.
                 """;
 
-        return emailClassifier.classify("email_001", "YOUR REAL SUBJECT", "YOUR REAL BODY");
+        return emailClassifier.classify("email_001",
+                "YOUR REAL SUBJECT",
+                "YOUR REAL BODY");
     }
 
     @GetMapping("/api/gemini/extract")

@@ -456,9 +456,7 @@ public class ShippingAgent {
             return "null";
         }
 
-        String value = node.asText()
-                .trim()
-                .replaceAll("\\s+", " ");
+        String value = node.asText().trim().replaceAll("\\s+", " ");
 
         try {
             return new BigDecimal(value)

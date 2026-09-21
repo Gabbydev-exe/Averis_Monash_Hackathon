@@ -8,8 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class GeminiPipelineController {
 
-    private final DataProcessor processor =
-            new DataProcessor();
+    private final DataProcessor processor = new DataProcessor();
 
     @GetMapping("/api/gemini/process/{emailId}")
     public JsonNode process(@PathVariable String emailId) {

@@ -116,7 +116,8 @@ public class ShipmentExtractor {
 
                 Document:
                 %s
-                """.formatted(documentText);
+                """
+                .formatted(documentText);
 
         return vertex.generateJson(prompt, schema);
     }

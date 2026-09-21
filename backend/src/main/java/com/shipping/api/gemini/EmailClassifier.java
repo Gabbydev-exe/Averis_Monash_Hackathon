@@ -56,7 +56,6 @@ public class EmailClassifier {
             """.formatted(emailId, subject, body);
 
         String result = vertex.generate(prompt).trim();
-
         return validateCategory(result);
     }
 
