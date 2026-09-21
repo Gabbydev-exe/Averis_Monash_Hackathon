@@ -161,8 +161,9 @@ HTTP 503 statuses:
 
 ## Local development
 
-Default profile no-db keeps the starter running without a database. A developer
-who has gcloud installed can use the same cloudsql profile locally after:
+The default profile is cloudsql and a database is required. There is no no-db
+fallback. Apply [PERSISTENCE.md](PERSISTENCE.md) before running this version.
+A developer with gcloud installed can use cloudsql locally after:
 
 ```powershell
 gcloud auth application-default login
