@@ -1,6 +1,7 @@
 HELP.md
 .env
 .env.*
+*.env
 !.env.example
 *.log
 target/
@@ -21,7 +22,6 @@ set-env.sh
 ### IntelliJ IDEA ###
 .idea
 *.iws
-*.xml
 *.iml
 *.ipr
 
