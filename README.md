@@ -64,8 +64,8 @@ Manual document verification across various layouts, terminology differences (e.
         └───────────┴─► [ Cloud SQL MySQL ] (Emails, Extracted JSON, Human Reviews)
 ```
 
-* **Frontend**: Vue.js (Node 24), Axios, Bootstrap 5 CSS — hosted on **Firebase Hosting**.
-* **Backend**: Java 25 / Spring Boot 2.5+, Spring Data JPA, Hibernate, Maven — containerized on **Google Cloud Run**.
+* **Frontend**: Vue 3, Vite, Vue Router, native fetch and custom CSS. — hosted on **Firebase Hosting**.
+* **Backend**: Spring Boot 4.1.1, JDBC, Java 21 build target and Docker runtime. CI uses Java 25. Maven — containerized on **Google Cloud Run**.
 * **Database**: MySQL on **Google Cloud SQL** (`hackathon-509104:asia-southeast1:shipping-mysql`).
 * **AI & Cloud Services**: **Google Gemini API** (schema-constrained field extraction), **Google Secret Manager**, **Google Artifact Registry**.
 * **CI/CD**: **GitHub Actions** (`ci.yml` PR checks and `deploy.yml` continuous deployment).
@@ -121,7 +121,7 @@ cd frontend
 npm ci
 npm run dev
 ```
-The Vue application will run locally at `http://localhost:5173` or `http://localhost:8081`.
+The Vue application will run locally at `http://localhost:5173`.
 
 ---
 
@@ -129,12 +129,13 @@ The Vue application will run locally at `http://localhost:5173` or `http://local
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/status` | Backend operational status & health check. |
+| `GET` | `/api/emails` | Backend operational status & health check. |
 | `GET` | `/api/inbox` | Retrieves all parsed email records and metadata. |
 | `GET` | `/api/emails/{id}` | Retrieves specific email details, extracted SI/BL fields, and verification status. |
-| `POST` | `/api/verify` | Triggers document extraction & discrepancy detection engine. |
-| `POST` | `/api/review` | Saves human reviewer approval or override decisions to MySQL. |
-| `POST` | `/submit` | Benchmark evaluation endpoint for dataset validation. |
+| `POST` | `/api/verify` | (not yet)Triggers document extraction & discrepancy detection engine. |
+| `POST` | `/api/review` | (not yet)Saves human reviewer approval or override decisions to MySQL. |
+| `POST` | `/import` | Accept a pure JSON file as input. |
+| `GET` | `/export` | Support selection and search function,export in JSON or CSV. |
 
 ---
 
@@ -161,7 +162,7 @@ To evaluate the pipeline against the dataset reference benchmark:
 ## 🚀 Cloud Deployment & CI/CD
 
 ### Automated Continuous Deployment
-Pushes to the `main` branch trigger `.github/workflows/deploy.yml`, which runs unit/build checks and deploys:
+Pushes to the `main` branch trigger `.github/workflows/cd.yml`, which runs unit/build checks and deploys:
 * **Spring Boot API** to **Google Cloud Run** (`shipping-api`).
 * **Vue Frontend** to **Firebase Hosting** (`hackathon-509104.web.app`).
 
