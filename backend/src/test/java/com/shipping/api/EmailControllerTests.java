@@ -91,7 +91,7 @@ class EmailControllerTests {
 
         var xlsx = emailController.getAttachmentText("email_005", "email_005_SI.xlsx");
         assertThat(xlsx.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(xlsx.getBody().status()).isEqualTo(AttachmentReadStatus.UNSUPPORTED);
+        assertThat(xlsx.getBody().status()).isEqualTo(AttachmentReadStatus.OK);
 
         var corruptPdf = emailController.getAttachmentText("email_511", "email_511_BL.pdf");
         assertThat(corruptPdf.getStatusCode()).isEqualTo(HttpStatus.OK);

@@ -3,6 +3,13 @@ package com.shipping.api.document;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 
@@ -32,9 +39,12 @@ public class AttachmentTextReader {
         if (lower.endsWith(".docx")) {
             return readDocx(safeFilename, bytes);
         }
+        if (lower.endsWith(".xlsx")) {
+            return readXlsx(safeFilename, bytes);
+        }
 
         return result(safeFilename, AttachmentReadStatus.UNSUPPORTED, null,
-                "Unsupported attachment format. Supported text extraction formats: .txt, .pdf, .docx.");
+                "Unsupported attachment format. Supported text extraction formats: .txt, .pdf, .docx, .xlsx.");
     }
 
     private AttachmentTextResult readTxt(String filename, byte[] bytes) {
@@ -81,6 +91,61 @@ public class AttachmentTextReader {
         } catch (Exception exception) {
             return result(filename, AttachmentReadStatus.UNREADABLE, null,
                     "DOCX could not be read.");
+        }
+    }
+
+    private AttachmentTextResult readXlsx(String filename, byte[] bytes) {
+        try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(bytes))) {
+            DataFormatter formatter = new DataFormatter(Locale.ROOT);
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
+            StringBuilder text = new StringBuilder();
+
+            for (int sheetIndex = 0; sheetIndex < workbook.getNumberOfSheets(); sheetIndex++) {
+                Sheet sheet = workbook.getSheetAt(sheetIndex);
+
+                if (workbook.getNumberOfSheets() > 1) {
+                    if (text.length() > 0) {
+                        text.append('\n');
+                    }
+                    text.append("Sheet: ").append(sheet.getSheetName()).append('\n');
+                }
+
+                for (Row row : sheet) {
+                    StringBuilder rowText = new StringBuilder();
+                    int firstCell = row.getFirstCellNum();
+                    int lastCell = row.getLastCellNum();
+
+                    if (firstCell < 0 || lastCell < 0) {
+                        continue;
+                    }
+
+                    for (int cellIndex = firstCell; cellIndex < lastCell; cellIndex++) {
+                        Cell cell = row.getCell(cellIndex, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+                        String value = cell == null ? "" : formatter.formatCellValue(cell, evaluator).trim();
+
+                        if (rowText.length() > 0) {
+                            rowText.append('\t');
+                        }
+                        rowText.append(value);
+                    }
+
+                    String rowValue = rowText.toString().stripTrailing();
+                    if (!rowValue.isBlank()) {
+                        text.append(rowValue).append('\n');
+                    }
+                }
+            }
+
+            String extracted = text.toString().trim();
+            if (extracted.isBlank()) {
+                return result(filename, AttachmentReadStatus.EMPTY, null,
+                        "XLSX contains no text.");
+            }
+
+            return result(filename, AttachmentReadStatus.OK, extracted, null);
+        } catch (Exception exception) {
+            return result(filename, AttachmentReadStatus.UNREADABLE, null,
+                    "XLSX could not be read.");
         }
     }
 

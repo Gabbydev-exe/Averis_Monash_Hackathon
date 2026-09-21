@@ -35,10 +35,10 @@ class AttachmentTextReaderTests {
 
     @Test
     void reportsUnsupportedFormatsExplicitly() {
-        var result = reader.read("sheet.xlsx", new byte[]{1, 2, 3});
+        var result = reader.read("image.png", new byte[]{1, 2, 3});
         assertThat(result.status()).isEqualTo(AttachmentReadStatus.UNSUPPORTED);
         assertThat(result.text()).isNull();
-        assertThat(result.message()).contains(".txt, .pdf, .docx");
+        assertThat(result.message()).contains(".txt, .pdf, .docx, .xlsx");
     }
 
     @Test
@@ -53,6 +53,22 @@ class AttachmentTextReaderTests {
         var result = reader.read("email_055_BL.docx", resourceBytes("email_055_BL.docx"));
         assertThat(result.status()).isEqualTo(AttachmentReadStatus.OK);
         assertThat(result.text()).isNotBlank();
+    }
+
+    @Test
+    void readsParticipantXlsx() throws IOException {
+        var result = reader.read("email_005_SI.xlsx", resourceBytes("email_005_SI.xlsx"));
+        assertThat(result.status()).isEqualTo(AttachmentReadStatus.OK);
+        assertThat(result.text()).isNotBlank();
+        assertThat(result.message()).isNull();
+    }
+
+    @Test
+    void corruptXlsxIsUnreadable() {
+        var result = reader.read("broken.xlsx", new byte[]{1, 2, 3});
+        assertThat(result.status()).isEqualTo(AttachmentReadStatus.UNREADABLE);
+        assertThat(result.text()).isNull();
+        assertThat(result.message()).contains("XLSX could not be read");
     }
 
     @Test
