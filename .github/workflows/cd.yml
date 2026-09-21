@@ -1,0 +1,93 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  ci-gate:
+    name: CI Verification Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'maven'
+
+      - name: Verify Backend Tests Pass
+        working-directory: backend
+        run: |
+          chmod +x mvnw
+          ./mvnw test
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Verify Frontend Compiles
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  deploy-backend:
+    name: Deploy to Cloud Run
+    needs: ci-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        working-directory: backend
+        run: |
+          gcloud run deploy shipping-api \
+            --source . \
+            --region asia-southeast1 \
+            --project hackathon-509104 \
+            --platform managed \
+            --allow-unauthenticated \
+            --add-cloudsql-instances hackathon-509104:asia-southeast1:shipping-mysql \
+            --remove-secrets DB_PASSWORD \
+            --set-env-vars SPRING_PROFILES_ACTIVE=cloudsql,INSTANCE_CONNECTION_NAME=hackathon-509104:asia-southeast1:shipping-mysql,DB_NAME=shipping_db,DB_USER=shipping_app,SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
+
+  deploy-frontend:
+    name: Deploy to Firebase Hosting
+    needs: ci-gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Firebase
+        working-directory: frontend
+        run: |
+          npx firebase-tools deploy --only hosting --project hackathon-509104 --token "${{ secrets.FIREBASE_TOKEN }}"
+
