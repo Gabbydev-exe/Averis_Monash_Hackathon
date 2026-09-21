@@ -2,6 +2,7 @@ package com.shipping.api.controller;
 
 import com.shipping.api.model.EmailDetailDto;
 import com.shipping.api.model.EmailSummaryDto;
+import com.shipping.api.document.AttachmentTextResult;
 import com.shipping.api.service.EmailDataService;
 import org.springframework.dao.DataAccessException;
 import org.slf4j.Logger;
@@ -37,6 +38,16 @@ public class EmailController {
     @GetMapping("/{id}")
     public ResponseEntity<EmailDetailDto> getEmailById(@PathVariable String id) {
         return emailDataService.getEmailDetail(id)
+                .map(ResponseEntity::ok)
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
+    }
+
+    @GetMapping("/{id}/attachments/{filename}/text")
+    public ResponseEntity<AttachmentTextResult> getAttachmentText(
+            @PathVariable String id,
+            @PathVariable String filename
+    ) {
+        return emailDataService.getAttachmentText(id, filename)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
     }

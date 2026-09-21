@@ -2,6 +2,7 @@ package com.shipping.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shipping.api.controller.EmailController;
+import com.shipping.api.document.AttachmentReadStatus;
 import com.shipping.api.model.EmailDetailDto;
 import com.shipping.api.model.EmailSummaryDto;
 import com.shipping.api.service.EmailDataService;
@@ -71,6 +72,38 @@ class EmailControllerTests {
         assertThat(response.getHeaders().getContentType().toString()).contains("text/plain");
         String content = new String(response.getBody());
         assertThat(content).contains("SHIPPING INSTRUCTION");
+    }
+
+    @Test
+    void shouldExtractTxtPdfAndDocxAndReportUnsupportedOrUnreadable() {
+        var txt = emailController.getAttachmentText("email_004", "email_004_SI.txt");
+        assertThat(txt.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(txt.getBody().status()).isEqualTo(AttachmentReadStatus.OK);
+        assertThat(txt.getBody().text()).contains("SHIPPING INSTRUCTION");
+
+        var pdf = emailController.getAttachmentText("email_059", "email_059_SI.pdf");
+        assertThat(pdf.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(pdf.getBody().status()).isEqualTo(AttachmentReadStatus.OK);
+
+        var docx = emailController.getAttachmentText("email_055", "email_055_BL.docx");
+        assertThat(docx.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(docx.getBody().status()).isEqualTo(AttachmentReadStatus.OK);
+
+        var xlsx = emailController.getAttachmentText("email_005", "email_005_SI.xlsx");
+        assertThat(xlsx.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(xlsx.getBody().status()).isEqualTo(AttachmentReadStatus.UNSUPPORTED);
+
+        var corruptPdf = emailController.getAttachmentText("email_511", "email_511_BL.pdf");
+        assertThat(corruptPdf.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(corruptPdf.getBody().status()).isEqualTo(AttachmentReadStatus.UNREADABLE);
+    }
+
+    @Test
+    void textEndpointStillRejectsMissingOrWrongOwnerAttachments() {
+        assertThat(emailController.getAttachmentText("email_004", "non_existent.txt").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(emailController.getAttachmentText("email_003", "email_004_SI.txt").getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
