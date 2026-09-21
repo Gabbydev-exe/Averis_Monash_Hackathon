@@ -1,13 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
 import InboxView from '../views/InboxView.vue'
+import DataView from '../views/DataView.vue'
 
 const routes = [
   {
     path: '/',
-    name: 'home',
-    component: HomeView,
+    redirect: '/inbox',
   },
+  { path: '/data', name: 'data', component: DataView },
   {
     path: '/inbox',
     name: 'inbox',

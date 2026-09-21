@@ -4,6 +4,11 @@ import com.shipping.api.model.EmailDetailDto;
 import com.shipping.api.model.EmailSummaryDto;
 import com.shipping.api.document.AttachmentTextResult;
 import com.shipping.api.service.EmailDataService;
+import com.shipping.api.service.EmailJsonData;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import org.springframework.dao.DataAccessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +38,61 @@ public class EmailController {
     @GetMapping({"", "/"})
     public List<EmailSummaryDto> getEmails() {
         return emailDataService.getAllEmailSummaries();
+    }
+
+    @PostMapping(value = "/import", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public EmailDataService.ImportResult importEmails(HttpServletRequest request) throws IOException {
+        if (request.getContentLengthLong() > EmailJsonData.MAX_BYTES) {
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "JSON data must be at most 5 MB.");
+        }
+        return emailDataService.importJson(request.getInputStream().readNBytes(EmailJsonData.MAX_BYTES + 1));
+    }
+
+    @GetMapping("/export")
+    public ResponseEntity<byte[]> exportEmails(@RequestParam(defaultValue = "json") String format) {
+        return exportResponse(format, emailDataService.exportSourceEmails());
+    }
+
+    public record ExportSelection(List<String> emailIds) {}
+
+    @PostMapping(value = "/export", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> exportSelectedEmails(@RequestParam(defaultValue = "json") String format,
+                                                       @RequestBody ExportSelection selection) {
+        if (selection.emailIds() == null || selection.emailIds().isEmpty()
+                || selection.emailIds().size() > 10000
+                || selection.emailIds().stream().anyMatch(id -> id == null || !id.matches("[A-Za-z0-9_-]{1,64}"))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Select between 1 and 10,000 valid email IDs.");
+        }
+        var ids = new java.util.HashSet<>(selection.emailIds());
+        var records = emailDataService.exportSourceEmails().stream()
+                .filter(record -> ids.contains(record.path("email_id").asText())).toList();
+        if (records.size() != ids.size()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Some selected emails are no longer available. Refresh the list and select again.");
+        }
+        return exportResponse(format, records);
+    }
+
+    private ResponseEntity<byte[]> exportResponse(String format, List<com.fasterxml.jackson.databind.JsonNode> records) {
+        byte[] data;
+        MediaType contentType;
+        if (format.equals("json")) {
+            try { data = new com.fasterxml.jackson.databind.ObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsBytes(records); }
+            catch (IOException exception) { throw new IllegalStateException("Could not serialize email data", exception); }
+            contentType = MediaType.APPLICATION_JSON;
+        } else if (format.equals("csv")) {
+            data = EmailJsonData.csv(records).getBytes(StandardCharsets.UTF_8);
+            contentType = MediaType.parseMediaType("text/csv; charset=utf-8");
+        } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Export format must be json or csv.");
+        return ResponseEntity.ok().contentType(contentType)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"shipping-emails." + format + "\"")
+                .body(data);
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<Map<String, String>> invalidImport(ResponseStatusException exception) {
+        return ResponseEntity.status(exception.getStatusCode()).header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(Map.of("message", java.util.Objects.requireNonNullElse(exception.getReason(), "Invalid request.")));
     }
 
     @GetMapping("/{id}")

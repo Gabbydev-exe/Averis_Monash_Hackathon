@@ -1,8 +1,5 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
 
 const searchQuery = ref('')
 const selectedFilter = ref('all')
@@ -144,9 +141,6 @@ onMounted(() => {
     <!-- Top Navigation Bar -->
     <div class="inbox-header">
       <div class="inbox-title-group">
-        <button type="button" class="back-link" @click="router.push('/')" aria-label="Back to System Status">
-          ← Back to Status
-        </button>
         <h1>Shipping Document Verification Inbox</h1>
         <p class="inbox-subtitle">
           Cross-examine incoming carrier emails and verify Shipping Instructions (SI) against draft Bills of Lading (B/L).

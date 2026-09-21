@@ -44,6 +44,7 @@ public class EmailDataService {
     private final ResourcePatternResolver resourceResolver = new PathMatchingResourcePatternResolver();
     private final AttachmentTextReader attachmentTextReader = new AttachmentTextReader();
 
+    private final Map<String, JsonNode> sourceEmails = new LinkedHashMap<>();
     private final Map<String, EmailDetailDto> emailDetailMap = new ConcurrentHashMap<>();
     private final List<EmailSummaryDto> emailSummaryList = new ArrayList<>();
 
@@ -72,6 +73,7 @@ public class EmailDataService {
             log.info("Email API uses MySQL; bundled inbox JSON is not loaded");
             return;
         }
+        sourceEmails.clear();
         emailDetailMap.clear();
         emailSummaryList.clear();
 
@@ -86,93 +88,8 @@ public class EmailDataService {
             for (Resource resource : resources) {
                 try (InputStream is = resource.getInputStream()) {
                     JsonNode rootNode = objectMapper.readTree(is);
-                    String emailId = rootNode.path("email_id").asText();
-                    if (emailId == null || emailId.isBlank()) {
-                        String filename = resource.getFilename();
-                        if (filename != null && filename.endsWith(".json")) {
-                            emailId = filename.substring(0, filename.length() - 5);
-                        } else {
-                            continue;
-                        }
-                    }
-
-                    String from = rootNode.path("from").asText("");
-                    String subject = rootNode.path("subject").asText("");
-                    String body = rootNode.path("body").asText("");
-
-                    List<EmailAttachmentDto> attachments = new ArrayList<>();
-                    JsonNode attArray = rootNode.path("attachments");
-                    if (attArray.isArray()) {
-                        for (JsonNode attNode : attArray) {
-                            String attPath = attNode.asText("");
-                            String attName = attPath.contains("/") ? attPath.substring(attPath.lastIndexOf('/') + 1) : attPath;
-                            String type = detectAttachmentType(attName);
-                            String size = calculateAttachmentSize(attPath, attName);
-                            attachments.add(new EmailAttachmentDto(attName, attPath, type, size));
-                        }
-                    }
-
-                    String senderName = extractSenderName(from, body);
-                    String bookingNo = extractBookingNumber(subject, body, emailId);
-                    String date = "Received";
-
-                    JsonNode reportNode = reports.get(emailId);
-                    String status = "pending";
-                    List<EmailFieldDto> fields = new ArrayList<>();
-
-                    if (reportNode != null && !reportNode.isNull() && !reportNode.isMissingNode()) {
-                        boolean hasDefect = reportNode.path("has_defect").asBoolean(false);
-                        String repStatus = reportNode.path("status").asText("").toUpperCase(Locale.ROOT);
-                        Set<String> defectFields = new HashSet<>();
-                        JsonNode defects = reportNode.path("defect_fields");
-                        if (defects.isArray()) {
-                            for (JsonNode d : defects) {
-                                defectFields.add(d.asText().toLowerCase(Locale.ROOT).replace(" ", "_"));
-                            }
-                        }
-
-                        if (hasDefect || "DEFECT".equals(repStatus) || !defectFields.isEmpty()) {
-                            status = "discrepancy";
-                        } else if ("OK".equals(repStatus) || "VERIFIED".equals(repStatus)) {
-                            status = "verified";
-                        }
-
-                        for (String label : STANDARD_FIELD_LABELS) {
-                            String normalizedLabelKey = label.toLowerCase(Locale.ROOT).replace(" ", "_");
-                            boolean isDefect = defectFields.contains(normalizedLabelKey)
-                                    || defectFields.contains(label.toLowerCase(Locale.ROOT));
-
-                            String fieldStatus;
-                            if ("pending".equals(status)) {
-                                fieldStatus = "pending";
-                            } else {
-                                fieldStatus = isDefect ? "mismatch" : "match";
-                            }
-                            String note = isDefect ? "Automated verification discrepancy flagged" : null;
-                            fields.add(new EmailFieldDto(label, "Pending extraction", "Pending extraction", fieldStatus, note));
-                        }
-                    } else {
-                        for (String label : STANDARD_FIELD_LABELS) {
-                            fields.add(new EmailFieldDto(label, "Pending", "Pending", "pending", null));
-                        }
-                    }
-
-                    EmailDetailDto detail = new EmailDetailDto(
-                            emailId,
-                            from,
-                            senderName,
-                            subject,
-                            date,
-                            status,
-                            bookingNo,
-                            "Pending extraction",
-                            "Pending extraction",
-                            "Pending extraction",
-                            body,
-                            attachments,
-                            fields
-                    );
-
+                    EmailDetailDto detail = parseEmailRecord(rootNode, resource.getFilename(), reports);
+                    sourceEmails.put(detail.id(), rootNode.deepCopy());
                     loadedDetails.add(detail);
                 } catch (Exception e) {
                     log.warn("Failed to parse email resource {}: {}", resource.getFilename(), e.getMessage());
@@ -200,6 +117,98 @@ public class EmailDataService {
         } catch (Exception e) {
             log.error("Error reading bundle emails: {}", e.getMessage(), e);
         }
+    }
+
+
+    private EmailDetailDto parseEmailRecord(JsonNode rootNode, String fallbackFilename, Map<String, JsonNode> reports) {
+        String emailId = rootNode.path("email_id").asText();
+        if (emailId == null || emailId.isBlank()) {
+            String filename = fallbackFilename;
+            if (filename != null && filename.endsWith(".json")) {
+                emailId = filename.substring(0, filename.length() - 5);
+            } else {
+                throw new IllegalArgumentException("Missing email ID");
+            }
+        }
+
+        String from = rootNode.path("from").asText("");
+        String subject = rootNode.path("subject").asText("");
+        String body = rootNode.path("body").asText("");
+
+        List<EmailAttachmentDto> attachments = new ArrayList<>();
+        JsonNode attArray = rootNode.path("attachments");
+        if (attArray.isArray()) {
+            for (JsonNode attNode : attArray) {
+                String attPath = attNode.asText("");
+                String attName = attPath.contains("/") ? attPath.substring(attPath.lastIndexOf('/') + 1) : attPath;
+                String type = detectAttachmentType(attName);
+                String size = calculateAttachmentSize(attPath, attName);
+                attachments.add(new EmailAttachmentDto(attName, attPath, type, size));
+            }
+        }
+
+        String senderName = extractSenderName(from, body);
+        String bookingNo = extractBookingNumber(subject, body, emailId);
+        String date = "Received";
+
+        JsonNode reportNode = reports.get(emailId);
+        String status = "pending";
+        List<EmailFieldDto> fields = new ArrayList<>();
+
+        if (reportNode != null && !reportNode.isNull() && !reportNode.isMissingNode()) {
+            boolean hasDefect = reportNode.path("has_defect").asBoolean(false);
+            String repStatus = reportNode.path("status").asText("").toUpperCase(Locale.ROOT);
+            Set<String> defectFields = new HashSet<>();
+            JsonNode defects = reportNode.path("defect_fields");
+            if (defects.isArray()) {
+                for (JsonNode d : defects) {
+                    defectFields.add(d.asText().toLowerCase(Locale.ROOT).replace(" ", "_"));
+                }
+            }
+
+            if (hasDefect || "DEFECT".equals(repStatus) || !defectFields.isEmpty()) {
+                status = "discrepancy";
+            } else if ("OK".equals(repStatus) || "VERIFIED".equals(repStatus)) {
+                status = "verified";
+            }
+
+            for (String label : STANDARD_FIELD_LABELS) {
+                String normalizedLabelKey = label.toLowerCase(Locale.ROOT).replace(" ", "_");
+                boolean isDefect = defectFields.contains(normalizedLabelKey)
+                        || defectFields.contains(label.toLowerCase(Locale.ROOT));
+
+                String fieldStatus;
+                if ("pending".equals(status)) {
+                    fieldStatus = "pending";
+                } else {
+                    fieldStatus = isDefect ? "mismatch" : "match";
+                }
+                String note = isDefect ? "Automated verification discrepancy flagged" : null;
+                fields.add(new EmailFieldDto(label, "Pending extraction", "Pending extraction", fieldStatus, note));
+            }
+        } else {
+            for (String label : STANDARD_FIELD_LABELS) {
+                fields.add(new EmailFieldDto(label, "Pending", "Pending", "pending", null));
+            }
+        }
+
+        EmailDetailDto detail = new EmailDetailDto(
+                emailId,
+                from,
+                senderName,
+                subject,
+                date,
+                status,
+                bookingNo,
+                "Pending extraction",
+                "Pending extraction",
+                "Pending extraction",
+                body,
+                attachments,
+                fields
+        );
+
+        return detail;
     }
 
     private Map<String, JsonNode> loadVerificationReports() {
@@ -233,7 +242,7 @@ public class EmailDataService {
         return reports;
     }
 
-    public List<EmailSummaryDto> getAllEmailSummaries() {
+    public synchronized List<EmailSummaryDto> getAllEmailSummaries() {
         if (emailRepository.isPresent()) {
             return emailRepository.get().findAll().stream()
                     .sorted(Comparator.comparingInt((EmailRepository.EmailRow row) -> extractIndex(row.id()))
@@ -244,21 +253,89 @@ public class EmailDataService {
                             extractBookingNumber(row.subject(), row.body(), row.id()), row.attachmentCount()))
                     .toList();
         }
-        return Collections.unmodifiableList(emailSummaryList);
+        return List.copyOf(emailSummaryList);
     }
 
-    public Optional<EmailDetailDto> getEmailDetail(String id) {
+    public synchronized Optional<EmailDetailDto> getEmailDetail(String id) {
         if (emailRepository.isPresent()) {
             return emailRepository.get().findById(id).map(this::toDatabaseDetail);
         }
         return Optional.ofNullable(emailDetailMap.get(id));
     }
 
+    public synchronized ImportResult importJson(byte[] data) {
+        List<JsonNode> records = EmailJsonData.parse(objectMapper, data);
+        int inserted;
+        if (emailRepository.isPresent()) {
+            List<EmailRepository.SourceImport> imports = records.stream().map(email -> {
+                List<EmailRepository.AttachmentImport> attachments = new ArrayList<>();
+                int order = 0;
+                for (JsonNode reference : email.path("attachments")) {
+                    String path = reference.asText();
+                    String filename = path.substring(path.lastIndexOf('/') + 1);
+                    Optional<byte[]> bytes = readBundleAttachment(path);
+                    String mimeType = switch (filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT)) {
+                        case "txt" -> "text/plain";
+                        case "pdf" -> "application/pdf";
+                        case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                        case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                        default -> "application/octet-stream";
+                    };
+                    attachments.add(new EmailRepository.AttachmentImport(
+                            sha256((email.path("email_id").asText() + "\0" + path).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                            path, order++, filename, mimeType, bytes.map(b -> (long) b.length).orElse(0L),
+                            bytes.map(EmailDataService::sha256).orElse("")));
+                }
+                return new EmailRepository.SourceImport(email, attachments);
+            }).toList();
+            inserted = emailRepository.get().insertSourceEmails(imports);
+        } else {
+            // Build every new detail before modifying the in-memory dataset.
+            var newRecords = records.stream().filter(e -> !sourceEmails.containsKey(e.path("email_id").asText())).toList();
+            var details = newRecords.stream().map(e -> parseEmailRecord(e, null, Map.of())).toList();
+            for (int i = 0; i < details.size(); i++) {
+                var detail = details.get(i);
+                sourceEmails.put(detail.id(), newRecords.get(i).deepCopy());
+                emailDetailMap.put(detail.id(), detail);
+                emailSummaryList.add(new EmailSummaryDto(detail.id(), detail.sender(), detail.senderName(), detail.subject(),
+                        detail.date(), detail.status(), detail.bookingNo(), detail.attachments().size()));
+            }
+            emailSummaryList.sort(Comparator.comparing(EmailSummaryDto::id));
+            inserted = details.size();
+        }
+        return new ImportResult(records.size(), inserted, records.size() - inserted,
+                emailRepository.isPresent() ? "database" : "session");
+    }
+
+    public synchronized List<JsonNode> exportSourceEmails() {
+        if (emailRepository.isPresent()) {
+            return emailRepository.get().findAllRawEmails().stream().map(raw -> {
+                try { return objectMapper.readTree(raw); }
+                catch (java.io.IOException exception) { throw new IllegalStateException("Stored email JSON is invalid.", exception); }
+            }).toList();
+        }
+        return sourceEmails.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                .map(entry -> (JsonNode) entry.getValue().deepCopy()).toList();
+    }
+
+    public byte[] exportJson() {
+        try { return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(exportSourceEmails()); }
+        catch (java.io.IOException exception) { throw new IllegalStateException("Could not export emails.", exception); }
+    }
+
+    private static String sha256(byte[] data) {
+        try { return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data)); }
+        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
+    public record ImportResult(int received, int inserted, int skipped, String storage) {}
+
     private EmailDetailDto toDatabaseDetail(EmailRepository.EmailRow row) {
         List<EmailAttachmentDto> attachments = emailRepository.orElseThrow().findAttachments(row.id()).stream()
                 .map(attachment -> new EmailAttachmentDto(
                         attachment.filename(), attachment.sourcePath(), detectAttachmentType(attachment.filename()),
-                        formatAttachmentSize(attachment.byteSize())))
+                        resourceResolver.getResource("classpath:data/bundle/" + attachment.sourcePath()).exists()
+                                ? formatAttachmentSize(attachment.byteSize()) : "Not uploaded"))
                 .toList();
         // This stage reads source data only. AI results and review persistence are separate work.
         List<EmailFieldDto> fields = STANDARD_FIELD_LABELS.stream()
@@ -343,7 +420,7 @@ public class EmailDataService {
             }
         } catch (Exception ignored) {
         }
-        return "15 KB";
+        return "Not uploaded";
     }
 
     private String extractSenderName(String from, String body) {

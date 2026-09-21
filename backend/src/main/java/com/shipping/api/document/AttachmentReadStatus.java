@@ -1,4 +1,4 @@
-package com.shipping.api.document;
+        package com.shipping.api.document;
 
 public enum AttachmentReadStatus {
     OK,

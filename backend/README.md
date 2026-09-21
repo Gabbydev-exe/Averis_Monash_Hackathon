@@ -4,6 +4,11 @@ This starter verifies Java-to-container-to-Cloud Run deployment. It now supports
 Cloud SQL for MySQL; follow [MYSQL_SETUP.md](MYSQL_SETUP.md) to enable it.
 Gemini, document comparison, and user authentication are not implemented yet.
 
+Structured email JSON import and JSON/CSV export are available in the frontend's
+**Import / Export** tab. See [DATA_TRANSFER.md](DATA_TRANSFER.md) for formats,
+limits, persistence behavior, and API endpoints. The home route opens the inbox;
+a compact connection indicator appears at the upper left.
+
 ## Local Java run (PowerShell)
 
 Requires JDK 25. Maven is downloaded by the included wrapper.
