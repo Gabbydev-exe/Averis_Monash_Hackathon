@@ -53,6 +53,21 @@ Manual document verification across various layouts, terminology differences (e.
    * Displays extracted SI values, BL values, and exact source text snippets side-by-side.
    * Escalates missing, unreadable, or ambiguous documents to human reviewers without failing silently.
 
+5. **JSON Data Ingestion & Custom Export**:
+   * **JSON Ingestion**: Uploads JSON email files with strict schema validation, rejecting incomplete, malformed, or duplicate records.
+   * **Custom Export**: Supports searching by sender, selecting individual or all matching records, and exporting formatted datasets in JSON or CSV.
+
+---
+
+## 📦 Dataset, Document Processing & Evaluation
+
+* Loads all 520 hackathon emails and attachment metadata.
+* Stores email metadata in MySQL, with a local no-db fallback.
+* Extracts text from TXT, PDF, DOCX, and XLSX attachments.
+* Handles attachment states: `OK`, `EMPTY`, `UNSUPPORTED`, and `UNREADABLE`.
+* Includes 25 manually checked test cases covering all five email categories and review scenarios.
+* Includes an evaluation exporter that validates and generates the required submission JSON for all 520 emails.
+
 ---
 
 ## 🏗️ System Architecture & Tech Stack
@@ -138,13 +153,14 @@ The Vue application will run locally at `http://localhost:5173`.
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/emails` | Backend operational status & health check. |
-| `GET` | `/api/inbox` | Retrieves all parsed email records and metadata. |
-| `GET` | `/api/emails/{id}` | Retrieves specific email details, extracted SI/BL fields, and verification status. |
-| `POST` | `/api/verify` | (not yet)Triggers document extraction & discrepancy detection engine. |
-| `POST` | `/api/review` | (not yet)Saves human reviewer approval or override decisions to MySQL. |
-| `POST` | `/import` | Accept a pure JSON file as input. |
-| `GET` | `/export` | Support selection and search function,export in JSON or CSV. |
+| `GET` | `/api/status` | Backend health check and service status. |
+| `GET` | `/api/emails` | Retrieves all parsed email records and summary metadata. |
+| `GET` | `/api/emails/{id}` | Retrieves specific email details, attachments, and verification fields. |
+| `GET` | `/api/emails/{id}/attachments/{filename}` | Streams raw attachment content (TXT, PDF, DOCX, XLSX). |
+| `POST` | `/api/emails/import` | Uploads JSON email records with schema validation (rejects duplicates & malformed data). |
+| `GET` | `/api/emails/export` | Exports all emails in JSON or CSV format. |
+| `POST` | `/api/emails/export` | Exports selected email records (filtered by sender search) in JSON or CSV format. |
+| `GET` | `/api/database/status` | Reports Cloud SQL MySQL database connectivity status. |
 
 ---
 
