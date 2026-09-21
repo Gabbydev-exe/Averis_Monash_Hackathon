@@ -44,15 +44,15 @@ public class ShippingAgent {
                         1. Use getEmail to retrieve the email.
 
                         2. Classify it as exactly one of:
-                           DOCUMENT_COMPARISON
-                           NEW_SI_REQUEST
+                           BL_COMPARISON
+                           SI_REQUEST
                            INVOICE_QUERY
                            GENERAL
                            SPAM
 
-                        3. Only DOCUMENT_COMPARISON emails continue to document checking.
+                        3. Only BL_COMPARISON emails continue to document checking.
 
-                        4. For DOCUMENT_COMPARISON, use listAttachments to find
+                        4. For BL_COMPARISON, use listAttachments to find
                            the attachments belonging to the email.
 
                         5. Identify the Shipping Instruction (SI) and Bill of Lading (BL).

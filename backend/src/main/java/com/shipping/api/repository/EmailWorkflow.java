@@ -14,7 +14,7 @@ public class EmailWorkflow {
     public EmailWorkflow(JdbcTemplate jdbc) { this.jdbc = jdbc; }
     public record Field(String key, String si, String bl, String siEvidence, String blEvidence) {}
     public record Extraction(String model, List<Field> fields, String expectedRevision, String category) {
-        public Extraction(String model, List<Field> fields, String expectedRevision) { this(model, fields, expectedRevision, "DOCUMENT_COMPARISON"); }
+        public Extraction(String model, List<Field> fields, String expectedRevision) { this(model, fields, expectedRevision, "BL_COMPARISON"); }
     }
     public record Review(String revision, String decision, String reviewer, String note) {}
     public record SavedReview(String id, String revision, String decision, String reviewer, String note, String savedAt) {}
@@ -71,7 +71,7 @@ public class EmailWorkflow {
     public Snapshot saveExtraction(String id, Extraction input) {
         if (input == null || input.expectedRevision() == null || input.model() == null || input.model().isBlank() || input.model().length() > 200 || input.fields() == null || input.fields().size() != 7)
             throw bad("Provide a model/source name and all seven shipment fields (use null for missing values).");
-        if (input.category() != null && !List.of("DOCUMENT_COMPARISON", "NEW_SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM").contains(input.category())) throw bad("Unknown email category.");
+        if (input.category() != null && !List.of("BL_COMPARISON", "SI_REQUEST", "INVOICE_QUERY", "GENERAL", "SPAM").contains(input.category())) throw bad("Unknown email category.");
         var keys = new HashSet<String>();
         for (var f : input.fields()) {
             if (f == null || !KEYS.contains(f.key()) || !keys.add(f.key())) throw bad("Each shipment field must appear exactly once.");
@@ -84,7 +84,7 @@ public class EmailWorkflow {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "Email data or extraction changed. Reload before saving.");
             jdbc.update("DELETE FROM shipment_fields WHERE email_id = ?", id);
             jdbc.update("DELETE FROM email_extractions WHERE email_id = ?", id);
-            jdbc.update("INSERT INTO email_extractions (email_id, revision, model_name, category) VALUES (?, ?, ?, ?)", id, UUID.randomUUID().toString(), input.model(), input.category() == null ? "DOCUMENT_COMPARISON" : input.category());
+            jdbc.update("INSERT INTO email_extractions (email_id, revision, model_name, category) VALUES (?, ?, ?, ?)", id, UUID.randomUUID().toString(), input.model(), input.category() == null ? "BL_COMPARISON" : input.category());
             for (var f : input.fields()) jdbc.update("INSERT INTO shipment_fields (email_id, field_key, si_value, bl_value, si_evidence, bl_evidence) VALUES (?, ?, ?, ?, ?, ?)", id, f.key(), f.si(), f.bl(), f.siEvidence(), f.blEvidence());
             return snapshot(id);
         });
