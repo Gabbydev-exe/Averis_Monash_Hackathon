@@ -11,6 +11,9 @@ const autoEnabled = ref(localStorage.getItem(AUTO_PROCESSING_PREFERENCE) !== 'fa
 const automationMessage = ref('Automatic verification is enabled.')
 const automationBusy = ref(false)
 const queueErrors = ref([])
+const forceReverifyBusy = ref(false)
+const forceReverifyCancelled = ref(false)
+const forceProgress = ref(null)
 let automationTimer
 let disposed = false
 watch(autoEnabled, enabled => localStorage.setItem(AUTO_PROCESSING_PREFERENCE, String(enabled)))
@@ -155,6 +158,91 @@ async function runVerification() {
   finally { isVerifying.value = false }
 }
 
+async function forceReverifyAll() {
+  if (forceReverifyBusy.value || automationBusy.value || isVerifying.value || emails.value.length === 0) return
+
+  const confirmed = window.confirm(
+    `Force Gemini to re-verify all ${emails.value.length} emails?\n\n` +
+    'This can generate hundreds of paid Vertex AI requests. Each successful result replaces the current AI extraction; saved human reviews remain in history. Keep this page open until processing finishes.'
+  )
+  if (!confirmed) return
+
+  // Avoid competing with the normal queue while this browser explicitly reprocesses every email.
+  autoEnabled.value = false
+  forceReverifyBusy.value = true
+  forceReverifyCancelled.value = false
+  isVerifying.value = true
+  reviewError.value = ''
+
+  const ids = emails.value.map(email => email.id)
+  let attempted = 0
+  let succeeded = 0
+  let failed = 0
+  let consecutiveFailures = 0
+  let lastFailure = ''
+
+  forceProgress.value = { attempted, total: ids.length, succeeded, failed, state: 'running' }
+
+  try {
+    for (const id of ids) {
+      if (forceReverifyCancelled.value) break
+
+      try {
+        const response = await fetch(`/api/gemini/process/${id}`, { method: 'POST' })
+        if (!response.ok) throw new Error(await errorFrom(response, `Could not re-verify ${id}`))
+
+        const saved = await response.json()
+        const item = emails.value.find(email => email.id === id)
+        if (item) { item.status = saved.workflow_status; item.category = saved.category }
+        succeeded++
+        consecutiveFailures = 0
+      } catch (error) {
+        failed++
+        consecutiveFailures++
+        lastFailure = `${id}: ${error.message || 'AI processing failed.'}`
+
+        // A shared IAM, quota or model outage should not create hundreds of failed paid requests.
+        if (consecutiveFailures >= 3) {
+          forceReverifyCancelled.value = true
+          break
+        }
+      } finally {
+        attempted++
+        forceProgress.value = { attempted, total: ids.length, succeeded, failed, state: 'running' }
+      }
+
+      // Keep the bulk action sequential and leave a small gap between model workloads.
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+  } finally {
+    const stoppedForFailures = consecutiveFailures >= 3
+    const cancelled = forceReverifyCancelled.value && !stoppedForFailures
+    forceProgress.value = {
+      attempted,
+      total: ids.length,
+      succeeded,
+      failed,
+      state: stoppedForFailures ? 'failed' : cancelled ? 'cancelled' : 'complete',
+    }
+    automationMessage.value = stoppedForFailures
+      ? `Bulk re-verification stopped after three consecutive failures. ${lastFailure}`
+      : cancelled
+        ? `Bulk re-verification cancelled after ${attempted} emails.`
+        : `Bulk re-verification finished: ${succeeded} succeeded and ${failed} failed.`
+
+    forceReverifyBusy.value = false
+    isVerifying.value = false
+    await fetchEmailList()
+    const failures = await fetch('/api/gemini/queue-errors')
+    if (failures.ok) queueErrors.value = await failures.json()
+  }
+}
+
+function cancelForceReverify() {
+  forceReverifyCancelled.value = true
+  automationMessage.value = 'Stopping bulk re-verification after the current email finishes…'
+}
+
 async function saveReview(decision) {
   if (!currentDetail.value || !workflow.value || isVerifying.value) return
   const id = currentDetail.value.id
@@ -220,9 +308,24 @@ onUnmounted(() => { disposed = true; clearTimeout(automationTimer) })
     </div>
 
     <section class="automation-bar" aria-label="Automatic verification">
-      <label><input v-model="autoEnabled" type="checkbox" /> Automatically process unverified emails</label>
+      <label><input v-model="autoEnabled" type="checkbox" :disabled="forceReverifyBusy" /> Automatically process unverified emails</label>
       <p role="status">{{ automationMessage }} <span v-if="!autoEnabled && automationBusy">Current request will finish.</span></p>
       <small>This browser setting is remembered after reload. Exact seven-field matches pass automatically. Every difference requires human review. Similarity percentages are advisory.</small>
+      <div class="automation-danger-zone">
+        <button
+          type="button"
+          class="btn-force-reverify"
+          :disabled="forceReverifyBusy || automationBusy || isVerifying || emails.length === 0"
+          @click="forceReverifyAll"
+        >
+          {{ forceReverifyBusy ? 'Re-verifying all emails…' : '⚠ Force AI to re-verify all emails' }}
+        </button>
+        <button v-if="forceReverifyBusy" type="button" class="btn-cancel-reverify" @click="cancelForceReverify">Stop after current email</button>
+        <p v-if="forceProgress" class="force-progress" role="status">
+          {{ forceProgress.attempted }} / {{ forceProgress.total }} attempted ·
+          {{ forceProgress.succeeded }} succeeded · {{ forceProgress.failed }} failed
+        </p>
+      </div>
       <details v-if="queueErrors.length"><summary>Processing errors ({{ queueErrors.length }})</summary><p v-for="failure in queueErrors" :key="failure.email_id">{{ failure.email_id }} · {{ failure.attempts }} attempts · {{ failure.last_error }}</p></details>
     </section>
     <nav class="category-tabs" aria-label="Email categories">
@@ -530,6 +633,12 @@ onUnmounted(() => { disposed = true; clearTimeout(automationTimer) })
 
 <style scoped>
 .automation-bar, .assessment-card { padding: 16px; background: #f0f5ed; border: 1px solid #ccdcca; border-radius: 12px; margin-bottom: 16px; overflow-wrap: anywhere; }
+.automation-danger-zone { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #d7b5b5; }
+.btn-force-reverify { padding: 9px 14px; border: 1px solid #991b1b; border-radius: 7px; background: #dc2626; color: #fff; font-weight: 700; cursor: pointer; }
+.btn-force-reverify:hover:not(:disabled) { background: #b91c1c; }
+.btn-force-reverify:disabled { opacity: 0.58; cursor: not-allowed; }
+.btn-cancel-reverify { padding: 8px 12px; border: 1px solid #b91c1c; border-radius: 7px; background: #fff; color: #991b1b; font-weight: 600; cursor: pointer; }
+.force-progress { flex-basis: 100%; margin: 0; color: #7f1d1d; font-size: 13px; font-weight: 600; }
 .category-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .category-tabs button { padding: 9px 12px; background: white; color: #164f45; border: 1px solid #b7c9bd; }
 .category-tabs button.active { background: #164f45; color: white; }
