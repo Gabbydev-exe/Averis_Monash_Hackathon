@@ -99,7 +99,7 @@ onUnmounted(() => {
             <div class="header-badge">Quick Start Guide</div>
             <h2 id="welcome-modal-title" class="modal-title">Welcome to Ship AI Verifier</h2>
             <p class="modal-subtitle">
-              Automated inbox triage, shipping document extraction, and side-by-side discrepancy verification.
+              Import shipping emails, classify each request, and verify SI and draft B/L data with Gemini-assisted processing.
             </p>
           </div>
         </div>
@@ -115,9 +115,9 @@ onUnmounted(() => {
               <div class="workflow-card">
                 <div class="card-step-num">1</div>
                 <div class="card-content">
-                  <h4>Email Triage & Ingestion</h4>
+                  <h4>Import Emails & Documents</h4>
                   <p>
-                    Incoming carrier emails are automatically ingested and categorized into workflows like document comparisons, new SI requests, and invoice queries.
+                    Import email records from JSON. For one new email, you can also attach zero to two PDF, Word, Excel, or TXT source documents. Existing email IDs are preserved and never overwritten.
                   </p>
                 </div>
               </div>
@@ -125,9 +125,9 @@ onUnmounted(() => {
               <div class="workflow-card">
                 <div class="card-step-num">2</div>
                 <div class="card-content">
-                  <h4>AI Document Field Extraction</h4>
+                  <h4>Store & Link the Evidence</h4>
                   <p>
-                    Attached <strong>Shipping Instructions (SI)</strong> and draft <strong>Bills of Lading (B/L)</strong> (PDFs, Word docs, images) are parsed using Google Gemini AI to extract key shipment fields.
+                    Email records and workflow results are saved in Cloud SQL. Uploaded documents are stored in private cloud object storage and linked to the correct email by its ID and filename.
                   </p>
                 </div>
               </div>
@@ -135,9 +135,9 @@ onUnmounted(() => {
               <div class="workflow-card">
                 <div class="card-step-num">3</div>
                 <div class="card-content">
-                  <h4>7-Field Discrepancy Check</h4>
+                  <h4>Classify Every Email</h4>
                   <p>
-                    The system automatically compares 7 core parameters (Shipper, Consignee, Notify Party, POL, POD, Container Count, Gross Weight) to highlight matches and discrepancies.
+                    Gemini reads the current subject and message and sorts it into <strong>SI/B/L comparison</strong>, <strong>new SI request</strong>, <strong>invoice query</strong>, <strong>general</strong>, or <strong>spam</strong>. Category tabs keep the inbox organized.
                   </p>
                 </div>
               </div>
@@ -145,9 +145,29 @@ onUnmounted(() => {
               <div class="workflow-card">
                 <div class="card-step-num">4</div>
                 <div class="card-content">
-                  <h4>Human-in-the-Loop Review</h4>
+                  <h4>Process the Queue Automatically</h4>
                   <p>
-                    Reviewers can inspect evidence side-by-side, view original files, and confirm verified shipments or flag discrepancies with one click.
+                    Unprocessed emails enter a durable verification queue. Automatic processing handles eligible emails one at a time, avoids duplicate work across browser tabs, and saves each result. You can also run an email manually.
+                  </p>
+                </div>
+              </div>
+
+              <div class="workflow-card">
+                <div class="card-step-num">5</div>
+                <div class="card-content">
+                  <h4>Extract & Compare Seven Fields</h4>
+                  <p>
+                    Gemini reads the email body and supported attachments, identifies SI and draft B/L sources, and extracts Shipper, Consignee, Notify Party, POL, POD, Container Count, and Gross Weight. Exact matches are verified automatically; any difference requires human review.
+                  </p>
+                </div>
+              </div>
+
+              <div class="workflow-card">
+                <div class="card-step-num">6</div>
+                <div class="card-content">
+                  <h4>Review Evidence & Export Results</h4>
+                  <p>
+                    Inspect source filenames, field differences, AI match estimates, and original documents. Save an approval or issue flag with reviewer notes, then export processed results or source data as JSON or CSV.
                   </p>
                 </div>
               </div>
@@ -161,34 +181,42 @@ onUnmounted(() => {
             </h3>
             <div class="action-list">
               <div class="action-item">
+                <div class="action-icon">📥</div>
+                <div class="action-text">
+                  <strong>Import a New Email:</strong>
+                  Open <em>Import / Export</em>, select a JSON file, optionally select up to two source documents, and choose <em>Import email and documents</em>.
+                </div>
+              </div>
+
+              <div class="action-item">
                 <div class="action-icon">📬</div>
                 <div class="action-text">
-                  <strong>Browse & Filter Emails:</strong>
-                  Use the left inbox panel to search by booking number or filter emails by <em>Pending</em>, <em>Discrepancies</em>, or <em>Verified</em> status.
+                  <strong>Browse Classified Emails:</strong>
+                  Use category tabs, status filters, or search to find SI/B/L comparisons, SI requests, invoice queries, general messages, spam, and emails needing review.
                 </div>
               </div>
 
               <div class="action-item">
                 <div class="action-icon">⚡</div>
                 <div class="action-text">
-                  <strong>Run Verification:</strong>
-                  Select any email and click the <span class="badge-inline btn-pill">⚡ Run Verification</span> button to cross-check extracted SI and B/L values in real-time.
+                  <strong>Use Automatic Processing:</strong>
+                  Leave <em>Automatically process unverified emails</em> enabled to work through the queue, or select an email and click <span class="badge-inline btn-pill">Run Verification</span> to process it immediately.
                 </div>
               </div>
 
               <div class="action-item">
-                <div class="action-icon">📎</div>
+                <div class="action-icon">🔎</div>
                 <div class="action-text">
-                  <strong>Inspect Document Attachments:</strong>
-                  Click on the attached SI or BL file badges to view or download raw document paperwork.
+                  <strong>Review the Evidence:</strong>
+                  Open an email to compare SI and B/L fields, inspect the linked source documents, and approve or flag differences with a reviewer name and note.
                 </div>
               </div>
 
               <div class="action-item">
                 <div class="action-icon">📊</div>
                 <div class="action-text">
-                  <strong>Import & Export Datasets:</strong>
-                  Visit the <em>Import / Export</em> tab to upload batch JSON email files or export discrepancy reports to CSV or JSON formats.
+                  <strong>Export Completed Work:</strong>
+                  Select processed emails in <em>Import / Export</em> and download competition results or original source records in JSON or CSV format.
                 </div>
               </div>
             </div>

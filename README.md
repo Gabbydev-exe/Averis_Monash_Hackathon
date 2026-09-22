@@ -1,211 +1,279 @@
-# Ship AI Verifier — Shipping Document Verification System
+# Ship AI Verifier
 
 > **Averis x Monash Hackathon 2026**  
-> *AI-Assisted Automated Email Triage, Shipping Document Extraction, Discrepancy Detection & Human-in-the-Loop Verification Pipeline.*
+> AI-assisted email classification, shipping-document extraction, SI/B/L comparison, and human review.
 
----
+## Project overview
 
-## Current storage rollout
+Shipping operations teams receive large volumes of unstructured email. They must identify the purpose of each message, locate Shipping Instructions (SI) and draft Bills of Lading (B/L), and compare shipment details before documents can be approved.
 
-The application now requires MySQL for source emails, attachments, extracted fields,
-and review decisions. There is no temporary `no-db` storage mode. **Apply the additive
-migration and explicitly seed existing attachment bytes before deploying this version**:
-[Database-only storage setup](backend/PERSISTENCE.md). JSON import/export and selected-email
-exports remain separate from AI processing. The Gemini processing route now uses POST
-and stores results; reviews save through the backend instead of browser-only state.
+Ship AI Verifier turns that manual workflow into a persistent cloud application. Users import email data and source documents, Gemini classifies and extracts them, deterministic rules compare seven shipment fields, and reviewers inspect evidence before exporting competition results.
 
-## 📌 Project Overview
+## Current feature set
 
-Logistics and shipping operations teams handle large volumes of emails daily containing transport paperwork. Operations personnel must manually review incoming messages, separate routine operational queries from document verification requests, and compare **Shipping Instructions (SI)** against draft **Bills of Lading (BL)**.
+### Import and persistent storage
 
-Manual document verification across various layouts, terminology differences (e.g., "Port of Loading" vs. "Load Port"), and unstructured formats is time-consuming, repetitive, and vulnerable to human error. Unnoticed discrepancies lead to costly cargo delays, administrative re-work, and legal liabilities.
+- Import one email object, an array of emails, or an `{ "emails": [...] }` payload from JSON.
+- Validate the complete batch before writing. A request can contain up to 2,000 records and 5 MB of JSON.
+- Preserve the original JSON, including additional fields and Unicode text.
+- Skip existing email IDs without overwriting their data, attachments, extraction, or review history.
+- For one newly imported email, optionally upload zero, one, or two source documents from the Import / Export page.
+- Accept PDF, DOC, DOCX, XLSX, and UTF-8 TXT attachments up to 5 MB each.
+- Store all application records in Cloud SQL MySQL. There is no temporary session or local-database fallback.
+- Store newly uploaded document bytes in a private Google Cloud Storage bucket. Cloud SQL links each email ID and filename to its GCS object.
+- Continue reading older attachment BLOBs from Cloud SQL during migration to GCS.
 
-**Ship AI Verifier** automates inbox triage and document checking. It intelligently classifies incoming emails, extracts structured shipment metrics using **Google Gemini AI**, normalizes field values, detects discrepancies across seven core shipment fields, and provides an intuitive web interface with evidence-backed human-in-the-loop oversight.
+### AI classification and extraction
 
----
+- Classify the current email into one persisted category:
+  - `BL_COMPARISON`
+  - `SI_REQUEST`
+  - `INVOICE_QUERY`
+  - `GENERAL`
+  - `SPAM`
+- Treat quoted history, signatures, email text, and document content as untrusted input.
+- Distinguish a new SI request from a document-comparison request. Asking for a future draft B/L does not imply that a B/L already exists.
+- Read text-based PDF, legacy DOC, DOCX, XLSX, and UTF-8 TXT documents.
+- Identify SI and B/L document roles from their content rather than trusting filenames.
+- Use the current email body as an SI source when it contains explicit shipping instructions and no SI attachment was identified.
+- Extract and persist these seven fields:
+  - Shipper
+  - Consignee
+  - Notify Party
+  - Port of Loading
+  - Port of Discharge
+  - Container Count
+  - Gross Weight in kilograms
+- Save the source filename or `Email body` with each extracted value so reviewers can trace its origin.
+- Send corrupt, encrypted, unsupported, image-only, or unreadable documents to human review instead of inventing values. OCR for scanned images is not currently included.
 
-## ✨ Key Capabilities
+### Automatic verification queue
 
-1. **Intelligent Email Classification**:
-   * Automatically sorts incoming inbox emails into 5 distinct categories:
-     * `Document-Comparison Request` (triggers verification pipeline)
-     * `New SI Request`
-     * `Invoice Query`
-     * `General Operational Update`
-     * `Spam`
+- Process unverified emails automatically while the Inbox is open.
+- Remember the browser's automatic-processing checkbox after reload or navigation.
+- Support unattended processing through Google Cloud Scheduler calling the same backend queue.
+- Claim one email at a time with a durable Cloud SQL lease, preventing duplicate work across browser tabs and Cloud Run instances.
+- Retry failures after 60 seconds, stop automatic retries after three attempts, and allow an explicit manual retry with **Run Verification**.
+- Recover expired leases after an interrupted request or Cloud Run restart.
+- Avoid automatically reopening completed assessments. Uploading changed attachment bytes invalidates the current extraction and makes that email eligible again.
 
-2. **Document Field Extraction & Normalization**:
-   * Extracts text and structured data from SI and BL attachments (plain text, Word, PDF, and scanned documents).
-   * Normalizes variations in labels, formatting, and unit representations across documents.
+### SI/B/L comparison and review
 
-3. **Core 7-Field Comparison**:
-   * Performs side-by-side discrepancy checks on the 7 required shipment fields:
-     * **Shipper Name**
-     * **Consignee Name**
-     * **Notify Party**
-     * **Port of Loading (POL)**
-     * **Port of Discharge (POD)**
-     * **Container Count**
-     * **Gross Weight (kg)**
+- Compare all seven persisted SI and B/L values.
+- Automatically verify only when all seven stored values are literally identical.
+- Mark any differing value as `MISMATCH` and require human review.
+- Mark missing values, missing or unreadable attachments, ambiguous document sets, and incorrect document types as `NEEDS_REVIEW`.
+- Ask Gemini for a semantic match percentage and explanation only when complete values differ. The percentage is advisory and can never approve a mismatch.
+- Display categories in Inbox tabs and show `Unprocessed`, `Classified`, `Verified`, `Human review required`, or reviewer-flagged status.
+- Display SI and B/L values side by side, source evidence filenames, original email text, and downloadable source documents.
+- Show valid evidence in black, discrepancies in red, and pending evidence in amber.
+- Save reviewer name, decision, note, extraction revision, and review history separately from AI evidence.
+- Prevent approval when required values or document processing are incomplete.
 
-4. **Actionable Verification & Evidence-Backed Review**:
-   * Generates tri-state verification outcomes: `OK` (No mismatch detected), `MISMATCH`, or `NEEDS_REVIEW`.
-   * Displays extracted SI values, BL values, and exact source text snippets side-by-side.
-   * Escalates missing, unreadable, or ambiguous documents to human reviewers without failing silently.
+### Import, export, and user experience
 
-5. **JSON Data Ingestion & Custom Export**:
-   * **JSON Ingestion**: Uploads JSON email files with strict schema validation, rejecting incomplete, malformed, or duplicate records.
-   * **Custom Export**: Supports searching by sender, selecting individual or all matching records, and exporting formatted datasets in JSON or CSV.
+- Search emails by sender and select individual records or all visible matches.
+- Export original source records separately as JSON or spreadsheet-safe CSV.
+- Export processed competition results as JSON or CSV with:
+  - `category`
+  - `status`
+  - `review_reason`
+  - `defect_fields`
+  - `has_defect`
+- Refuse result export when a selected email has not been processed since its latest update.
+- Preserve selected attachment uploads across partial failures so retrying continues with the remaining file.
+- Show database/detail loading failures and a Retry action instead of an empty email panel.
+- Provide a compact API connection indicator and an updated **How It Works** guide.
 
----
+## Processing flow
 
-## 📦 Dataset, Document Processing & Evaluation
-
-* Loads all 520 hackathon emails and attachment metadata.
-* Stores email metadata in MySQL, with a local no-db fallback.
-* Extracts text from TXT, PDF, DOCX, and XLSX attachments.
-* Handles attachment states: `OK`, `EMPTY`, `UNSUPPORTED`, and `UNREADABLE`.
-* Includes 25 manually checked test cases covering all five email categories and review scenarios.
-* Includes an evaluation exporter that validates and generates the required submission JSON for all 520 emails.
-
----
-
-## 🏗️ System Architecture & Tech Stack
-
+```text
+JSON email + optional documents
+            |
+            v
+Vue Import / Export page
+            |
+            +--> Cloud SQL: email, attachment metadata, workflow state
+            +--> GCS: private attachment bytes
+            |
+            v
+Durable verification queue
+            |
+            v
+Gemini classification + document-role detection + field extraction
+            |
+            v
+Seven-field deterministic comparison
+       /                    \
+exact values          difference/incomplete
+     |                        |
+auto verified        human review required
+       \                    /
+        persisted result + JSON/CSV export
 ```
-[ Incoming Emails & Attachments ]
-              │
-              ▼
-    [ Vue 3 Frontend UI ] ◄────── (Firebase Hosting)
-              │
-              ▼
-  [ Spring Boot REST API ] ◄────── (Google Cloud Run)
-        │           │
-        │           ├─► [ Google Gemini AI ] (Classification & Extraction)
-        │           │
-        │           ├─► [ Cloud Storage ] (Raw SI / BL Files)
-        │           │
-        └───────────┴─► [ Cloud SQL MySQL ] (Emails, Extracted JSON, Human Reviews)
+
+## Architecture and technology
+
+```text
+[ Firebase Hosting: Vue 3 + Vite ]
+                  |
+                  v
+[ Cloud Run: Java 25 + Spring Boot REST API ]
+       |                  |                 |
+       v                  v                 v
+[ Cloud SQL MySQL ] [ Vertex AI Gemini ] [ Private GCS bucket ]
+       ^
+       |
+[ Cloud Scheduler: unattended queue trigger ]
 ```
 
-* **Frontend**: Vue 3, Vite, Vue Router, native fetch and custom CSS. — hosted on **Firebase Hosting**.
-* **Backend**: Spring Boot 4.1.1, JDBC, Java 21 build target and Docker runtime. CI uses Java 25. Maven — containerized on **Google Cloud Run**.
-* **Database**: MySQL on **Google Cloud SQL** (`hackathon-509104:asia-southeast1:shipping-mysql`).
-* **AI & Cloud Services**: **Google Gemini API** (schema-constrained field extraction), **Google Secret Manager**, **Google Artifact Registry**.
-* **CI/CD**: **GitHub Actions** (`ci.yml` PR checks and `deploy.yml` continuous deployment).
+- **Frontend:** Vue 3, Vite, Vue Router, native Fetch API, Firebase Hosting.
+- **Backend:** Java 25, Spring Boot 4.1.1, JDBC, Maven, Docker, Cloud Run.
+- **AI:** Google Gen AI Java SDK with Gemini on Vertex AI; Google ADK tools are available for agent-assisted investigation and persisted verification.
+- **Data:** Cloud SQL for source emails, metadata, categories, extracted fields, assessments, jobs, and human reviews; GCS for new attachment bytes.
+- **Delivery:** GitHub Actions tests and builds both applications before deploying Cloud Run and Firebase Hosting from `main`.
 
----
+## Database and cloud rollout
 
-## 🛠️ Local Development & Quickstart
+The backend does not create production tables automatically. Apply these scripts to the `shipping_db` Cloud SQL database before deploying the matching code:
+
+1. `backend/src/main/resources/db/persistence.sql`
+2. `backend/src/main/resources/db/automation.sql`
+3. `backend/src/main/resources/db/gcs.sql`
+
+Then create the private GCS bucket, grant the Cloud Run runtime service account object access, set `ATTACHMENTS_GCS_BUCKET`, and configure Cloud Scheduler if processing must continue while the Inbox is closed.
+
+Detailed instructions:
+
+- [Cloud SQL and GCS setup](backend/GCS_SETUP.md)
+- [Automatic verification and Cloud Scheduler](backend/AUTOMATION.md)
+- [Cloud deployment and rollback](DEPLOYMENT.md)
+
+## Local development
+
+Local application runs use the real Cloud SQL database and GCS bucket. Tests use a disposable in-memory H2 database and a fake object store; they do not make paid Gemini calls.
 
 ### Prerequisites
-* **Java 25** (`java -version`)
-* **Node.js 24 & npm** (`node --version`, `npm --version`)
-* **Google Cloud SDK / gcloud CLI** (`gcloud version`)
 
-### 1. Google Cloud Authentication
-Authenticate your terminal session with GCP project permissions:
-```bash
+- Java 25
+- Node.js 24 and npm
+- Google Cloud CLI
+- Access to project `hackathon-509104`, Cloud SQL, Vertex AI, Secret Manager, and the attachment bucket
+
+### Authenticate with Google Cloud
+
+```powershell
 gcloud auth login
 gcloud config set project hackathon-509104
 gcloud auth application-default login
 gcloud auth application-default set-quota-project hackathon-509104
 ```
 
-### 2. Backend Setup (Spring Boot)
-Open a terminal in `backend/` and load the database secret before starting the server:
+### Run the backend on Windows PowerShell
 
-* **On macOS / Linux (zsh/bash)**:
-  ```bash
-  cd backend
-  DB_PASS=$(gcloud secrets versions access latest --secret=shipping-db-password --project=hackathon-509104)
-  
-  SPRING_PROFILES_ACTIVE=cloudsql   INSTANCE_CONNECTION_NAME="hackathon-509104:asia-southeast1:shipping-mysql"   DB_NAME="shipping_db"   DB_USER="shipping_app"   SPRING_DATASOURCE_PASSWORD="${DB_PASS}"   ./mvnw spring-boot:run
-  ```
+```powershell
+cd C:\Users\111\Desktop\hackerthon\backend\backend
 
-* **On Windows (PowerShell)**:
-  ```powershell
-  cd backend
-  $env:PORT = "8081"
-  $env:SPRING_PROFILES_ACTIVE = "cloudsql"
-  $env:INSTANCE_CONNECTION_NAME = "hackathon-509104:asia-southeast1:shipping-mysql"
-  $env:DB_NAME = "shipping_db"
-  $env:DB_USER = "shipping_app"
-  $dbPassword = gcloud secrets versions access latest --secret=shipping-db-password --project=hackathon-509104
-  $env:SPRING_DATASOURCE_PASSWORD = $dbPassword
-  .\mvnw.cmd spring-boot:run
-  ```
+$env:PORT = "8081"
+$env:SPRING_PROFILES_ACTIVE = "cloudsql"
+$env:INSTANCE_CONNECTION_NAME = "hackathon-509104:asia-southeast1:shipping-mysql"
+$env:DB_NAME = "shipping_db"
+$env:DB_USER = "shipping_app"
+$env:ATTACHMENTS_GCS_BUCKET = "hackathon-509104-shipping-attachments"
 
-The backend REST API will run locally at `http://localhost:8081/`.
+$dbPassword = gcloud secrets versions access latest `
+  --secret=shipping-db-password `
+  --project=hackathon-509104
+if ($LASTEXITCODE -ne 0) { throw "Could not read shipping-db-password." }
+$env:SPRING_DATASOURCE_PASSWORD = $dbPassword
+Remove-Variable dbPassword
 
-### 3. Frontend Setup (Vue.js)
-In a separate terminal window, initialize and start the Vue client:
-```bash
-cd frontend
+.\mvnw.cmd spring-boot:run
+```
+
+The backend listens at `http://localhost:8081`.
+
+### Run the frontend
+
+Open a second PowerShell terminal:
+
+```powershell
+cd C:\Users\111\Desktop\hackerthon\backend\frontend
 npm ci
 npm run dev
 ```
-The Vue application will run locally at `http://localhost:5173`.
 
----
+The frontend listens at `http://localhost:5173` and proxies API requests to the backend.
 
-## 📡 API Endpoints
+## Main API endpoints
 
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/status` | Backend health check and service status. |
-| `GET` | `/api/emails` | Retrieves all parsed email records and summary metadata. |
-| `GET` | `/api/emails/{id}` | Retrieves specific email details, attachments, and verification fields. |
-| `GET` | `/api/emails/{id}/attachments/{filename}` | Streams raw attachment content (TXT, PDF, DOCX, XLSX). |
-| `POST` | `/api/emails/import` | Uploads JSON email records with schema validation (rejects duplicates & malformed data). |
-| `GET` | `/api/emails/export` | Exports all emails in JSON or CSV format. |
-| `POST` | `/api/emails/export` | Exports selected email records (filtered by sender search) in JSON or CSV format. |
-| `GET` | `/api/database/status` | Reports Cloud SQL MySQL database connectivity status. |
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/status` | API connectivity status. |
+| `GET` | `/api/database/status` | Cloud SQL connectivity status. |
+| `GET` | `/api/emails` | Email summaries with status and category. |
+| `GET` | `/api/emails/{id}` | Email details, attachment metadata, and comparison fields. |
+| `POST` | `/api/emails/import` | Validate and persist JSON email records. |
+| `GET/POST` | `/api/emails/export?format=json\|csv` | Export all or selected original source records. |
+| `GET/POST` | `/api/emails/export-results?format=json\|csv` | Export all or selected processed competition results. |
+| `POST` | `/api/emails/{id}/attachments/{filename}` | Add a supported document to a newly imported email. |
+| `PUT` | `/api/emails/{id}/attachments/{filename}` | Replace bytes for a registered attachment and invalidate its extraction. |
+| `GET` | `/api/emails/{id}/attachments/{filename}` | View or download attachment content. |
+| `GET` | `/api/emails/{id}/attachments/{filename}/text` | Read the backend's extracted document text and status. |
+| `GET` | `/api/emails/{id}/workflow` | Read saved extraction, assessment, category, and review history. |
+| `POST` | `/api/emails/{id}/reviews` | Save a human approval or issue flag. |
+| `POST` | `/api/gemini/process/{emailId}` | Manually classify and verify one email. |
+| `POST` | `/api/gemini/process-next` | Claim and process one eligible queued email. |
+| `GET` | `/api/gemini/queue-errors` | Read safe summaries of bounded queue failures. |
 
----
+## Verification and export rules
 
-## 🧪 Evaluation & Test Bench (`loader.py`)
+Machine result statuses are:
 
-To evaluate the pipeline against the dataset reference benchmark:
-1. Run local testing via `loader.py`:
-   ```python
-   from loader import Inbox
+- `OK`: all seven comparison values are literally identical, or the category does not require an SI/B/L comparison.
+- `MISMATCH`: complete SI and B/L values differ; `has_defect` is `true` and human review is required.
+- `NEEDS_REVIEW`: evidence is missing, unreadable, ambiguous, incomplete, or the wrong document type; `has_defect` remains `false` because the system cannot establish a reliable discrepancy.
 
-   inbox = Inbox("data")  # Or Inbox("http://localhost:8080")
-   for email in inbox:
-       print("Processing Email ID:", email["id"], email["subject"])
-       if "attachments" in email and email["attachments"]:
-           doc_text = inbox.read_text(email["attachments"][0])
-           print("Attachment Snippet:", doc_text[:100])
-       break
-   ```
-2. Format extracted results according to `sample_submission.json`.
-3. Post predictions to `POST /submit` or via `inbox.submit(...)` to generate accuracy scores.
+A later human decision does not rewrite the machine result. Review history and AI match percentages remain available in the Inbox and workflow API, while the competition export keeps its required five-field schema.
 
----
+## Testing
 
-## 🚀 Cloud Deployment & CI/CD
+Run backend tests:
 
-### Automated Continuous Deployment
-Pushes to the `main` branch trigger `.github/workflows/cd.yml`, which runs unit/build checks and deploys:
-* **Spring Boot API** to **Google Cloud Run** (`shipping-api`).
-* **Vue Frontend** to **Firebase Hosting** (`hackathon-509104.web.app`).
+```powershell
+cd backend
+.\mvnw.cmd test
+```
 
-### Manual Fallback & Operations
-For detailed manual fallback deployment commands and Cloud Run/Firebase rollback runbooks across macOS, Linux, and Windows, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+Run the frontend production build:
 
----
+```powershell
+cd frontend
+npm ci
+npm run build
+```
 
-## 👥 Team Roles & Responsibilities
+The test suite covers JSON validation and transaction rollback, durable persistence, attachment parsing, GCS replacement behavior, category and assessment persistence, exact-match policy, bounded queue retries and leases, export schema, stale-review protection, and missing/unreadable-document handling.
 
-* **Member 1**: Email Triage & Classification Engine (AI Prompting & Parsing).
-* **Member 2**: Document Information Extraction & Normalization.
-* **Member 3**: Discrepancy Comparison Engine & Rule Set Logic.
-* **Member 4**: Vue.js Frontend UI & Human Reviewer Workflow Interface.
-* **Member 5**: Cloud Infrastructure Delivery, CI/CD Pipeline, QA Coordination & Submission.
+## CI/CD
 
----
+Pushes to `main` run `.github/workflows/cd.yml`:
 
-## 📄 License & Attribution
+1. Run the Maven test suite with Java 25.
+2. Build the Vue application with Node.js 24.
+3. Deploy the Spring Boot source/Dockerfile to Cloud Run service `shipping-api` in `asia-southeast1`.
+4. Deploy the Vue build to Firebase Hosting.
 
-Developed for **Averis x Monash Hackathon 2026** by team participants from Monash University Malaysia.
+Database migrations, Cloud Scheduler, bucket IAM, Cloud Run runtime variables, and secrets remain explicit infrastructure operations and are not applied automatically by the workflow.
+
+## Team responsibilities
+
+- **Member 1:** Email classification, prompts, and sample validation.
+- **Member 2:** Document parsing, field extraction, and evidence validation.
+- **Member 3:** Comparison policy, workflow persistence, and human-review rules.
+- **Member 4:** Vue Inbox, Import / Export, and reviewer experience.
+- **Member 5:** Google Cloud infrastructure, CI/CD, security, testing, and submission coordination.
+
+## License and attribution
+
+Developed for the Averis x Monash Hackathon 2026 by Monash University Malaysia participants.

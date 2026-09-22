@@ -115,6 +115,7 @@ class EmailDataTransferTests {
         var result = service.importJson(json(List.of(changed, email("new_id"))));
         assertThat(result.inserted()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
+        assertThat(result.insertedIds()).containsExactly("new_id");
         assertThat(service.getEmailDetail("same_id").orElseThrow().bodyText()).isEqualTo(original.get("body"));
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM attachments", Integer.class)).isEqualTo(1);
     }

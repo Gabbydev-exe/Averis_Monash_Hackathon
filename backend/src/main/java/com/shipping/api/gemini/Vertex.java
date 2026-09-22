@@ -8,9 +8,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public class Vertex {
 
     private final Client client;
+    private static Client sharedClient;
+    private static synchronized Client sharedClient() {
+        if (sharedClient == null) sharedClient = Client.builder().project("hackathon-509104").location("asia-southeast1").enterprise(true)
+                .httpOptions(com.google.genai.types.HttpOptions.builder().timeout(60000)
+                        .retryOptions(com.google.genai.types.HttpRetryOptions.builder().attempts(1).build()).build()).build();
+        return sharedClient;
+    }
 
     public Vertex() {
-        this.client = Client.builder().project("hackathon-509104").location("asia-southeast1").enterprise(true).build();
+        this.client = sharedClient();
     }
 
     public String generate(String prompt) {

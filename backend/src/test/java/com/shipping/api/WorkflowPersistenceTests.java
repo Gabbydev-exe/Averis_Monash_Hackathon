@@ -62,7 +62,7 @@ class WorkflowPersistenceTests {
                 .andExpect(status().isBadRequest());
         assertThat(service.workflow("saved").revision()).isEqualTo(first.revision());
         var next = service.saveExtraction("saved", extraction(first.revision(), true));
-        assertThat(next.status()).isEqualTo("pending");
+        assertThat(next.status()).isEqualTo("needs_review");
         assertThat(next.reviews()).hasSize(1);
     }
     @Test void attachmentBytesPersistAndReplacingThemInvalidatesExtraction() throws Exception {
@@ -126,13 +126,13 @@ class WorkflowPersistenceTests {
         var restarted = new EmailDataService(new EmailRepository(jdbc));
         assertThat(restarted.workflow("pipeline").fields()).hasSize(7);
         assertThat(restarted.workflow("pipeline").category()).isEqualTo("BL_COMPARISON");
-        assertThat(restarted.workflow("pipeline").fields()).allMatch(f -> f.siEvidence() == null);
+        assertThat(restarted.workflow("pipeline").fields()).allMatch(f -> "SI.txt".equals(f.siEvidence()));
     }
     @Test void pipelineFailureNeverClaimsSavedExtractionAndMissingBytesNeedReview() {
         var failed = new com.shipping.api.gemini.DataProcessor(service, email -> { throw new RuntimeException("AI unavailable"); }, text -> "{}");
         assertThatThrownBy(() -> failed.process("saved")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
         assertThat(service.workflow("saved").revision()).isEqualTo("none");
-        var missing = new com.shipping.api.gemini.DataProcessor(service, email -> "BL_COMPARISON", text -> { throw new AssertionError("No attachment bytes should be read"); });
+        var missing = new com.shipping.api.gemini.DataProcessor(service, email -> "BL_COMPARISON", text -> { assertThat(text).startsWith("Current email body"); return "{\"document_type\":\"OTHER\"}"; });
         var missingResult = missing.process("saved");
         assertThat(missingResult.path("status").asText()).isEqualTo("NEEDS_REVIEW");
         assertThat(missingResult.path("has_defect").asBoolean()).isFalse();

@@ -28,14 +28,14 @@ class ShipmentComparisonTests {
         assertThat(ShipmentComparison.status("shipper", "", "ABC LTD")).isEqualTo("pending");
         assertThat(ShipmentComparison.status("consignee", "MOORIM SP CO LTD", CONSIGNEE)).isEqualTo("match");
     }
-    @Test void agentAndWebUseTheSameComparisonRules() throws Exception {
+    @Test void agentRequiresHumanReviewEvenForSemanticallySimilarPartyNames() throws Exception {
         var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         var si = mapper.createObjectNode();
         var bl = mapper.createObjectNode();
         for (String field : com.shipping.api.repository.EmailWorkflow.KEYS) { si.put(field, "1"); bl.put(field, "1"); }
         si.put("shipper", SHIPPER); bl.put("shipper", SHIPPER + SHIPPER_ADDRESS);
         si.put("consignee", CONSIGNEE); bl.put("consignee", CONSIGNEE + CONSIGNEE_ADDRESS);
-        assertThat(ShippingAgent.compareFiles(si.toString(), bl.toString()).get("result")).isEqualTo("No mismatch detected.");
+        assertThat(ShippingAgent.compareFiles(si.toString(), bl.toString()).get("result")).asString().contains("REVIEW_REQUIRED");
         bl.put("shipper", "DIFFERENT COMPANY SDN BHD" + SHIPPER_ADDRESS);
         assertThat(ShippingAgent.compareFiles(si.toString(), bl.toString()).get("result").toString()).contains("shipper | SI:");
     }

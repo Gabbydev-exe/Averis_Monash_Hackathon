@@ -36,6 +36,12 @@ public class AttachmentTextReader {
         if (lower.endsWith(".pdf")) {
             return readPdf(safeFilename, bytes);
         }
+        if (lower.endsWith(".doc")) {
+            try (var extractor = new org.apache.poi.hwpf.extractor.WordExtractor(new ByteArrayInputStream(bytes))) {
+                String text = extractor.getText();
+                return result(safeFilename, text.isBlank() ? AttachmentReadStatus.EMPTY : AttachmentReadStatus.OK, text, null);
+            } catch (Exception e) { return result(safeFilename, AttachmentReadStatus.UNREADABLE, null, "DOC could not be read."); }
+        }
         if (lower.endsWith(".docx")) {
             return readDocx(safeFilename, bytes);
         }
@@ -44,7 +50,7 @@ public class AttachmentTextReader {
         }
 
         return result(safeFilename, AttachmentReadStatus.UNSUPPORTED, null,
-                "Unsupported attachment format. Supported text extraction formats: .txt, .pdf, .docx, .xlsx.");
+                "Unsupported attachment format. Supported text extraction formats: .txt, .pdf, .doc, .docx, .xlsx.");
     }
 
     private AttachmentTextResult readTxt(String filename, byte[] bytes) {

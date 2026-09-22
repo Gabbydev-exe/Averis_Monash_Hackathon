@@ -39,7 +39,12 @@ public class ShippingAgent {
                 .instruction("""
                         You are a shipping document verification agent.
 
-                        Process each email using this workflow:
+                        For an end-to-end verification, call verifyEmail with the email ID.
+                        This tool persists classification, exact-field comparison, advisory AI similarity,
+                        and human-review requirements. Report its result faithfully. Never approve based
+                        on a similarity percentage. Other tools below are for investigating documents.
+
+                        Investigate each email using this workflow:
 
                         1. Use getEmail to retrieve the email.
 
@@ -95,6 +100,7 @@ public class ShippingAgent {
                           status, and comparison result.
                         """)
                 .tools(
+                        FunctionTool.create(ShippingAgent.class, "verifyEmail"),
                         FunctionTool.create(ShippingAgent.class, "getEmail"),
                         FunctionTool.create(
                                 ShippingAgent.class,
@@ -116,6 +122,16 @@ public class ShippingAgent {
                 .build();
 
         AdkWebServer.start(shippingAgent);
+    }
+
+    @Schema(name = "verify_email", description = "Verify a persisted email and save category, comparison and review requirements to Cloud SQL.")
+    public static Map<String, Object> verifyEmail(@Schema(name = "email_id", description = "Email ID to verify") String emailId) {
+        try {
+            var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(API_BASE + "/api/gemini/process/" + segment(emailId)))
+                    .timeout(java.time.Duration.ofSeconds(540)).POST(java.net.http.HttpRequest.BodyPublishers.noBody()).build();
+            var response = java.net.http.HttpClient.newHttpClient().send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            return Map.of("http_status", response.statusCode(), "result", response.body());
+        } catch (Exception error) { return Map.of("result", "REVIEW_REQUIRED: Verification could not be completed. Check saved results before retrying."); }
     }
 
     @Schema(
@@ -287,7 +303,7 @@ public class ShippingAgent {
                 String blText = blValue.asText();
                 String status = com.shipping.api.service.ShipmentComparison.status(field, siText, blText);
                 if (status.equals("pending")) return Map.of("result", "REVIEW_REQUIRED: Missing or invalid field '" + field + "'.");
-                if (status.equals("mismatch")) {
+                if (!siText.equals(blText)) {
                     mismatches.add(
                             field
                                     + " | SI: "
@@ -307,7 +323,7 @@ public class ShippingAgent {
 
             return Map.of(
                     "result",
-                    String.join("\n", mismatches)
+                    "REVIEW_REQUIRED: Values differ. " + String.join("\n", mismatches)
             );
 
         } catch (Exception e) {

@@ -1,8 +1,43 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const searchQuery = ref('')
 const selectedFilter = ref('all')
+const selectedCategory = ref('ALL')
+const categories = { ALL: 'All categories', UNCLASSIFIED: 'Unclassified', BL_COMPARISON: 'SI / BL comparison', SI_REQUEST: 'SI request', INVOICE_QUERY: 'Invoice query', GENERAL: 'General', SPAM: 'Spam' }
+const statusLabels = { pending: 'Unprocessed', needs_review: 'Human review required', discrepancy: 'Flagged by reviewer', verified: 'Verified', classified: 'Classified · no comparison needed' }
+const AUTO_PROCESSING_PREFERENCE = 'shipping-auto-processing-enabled'
+const autoEnabled = ref(localStorage.getItem(AUTO_PROCESSING_PREFERENCE) !== 'false')
+const automationMessage = ref('Automatic verification is enabled.')
+const automationBusy = ref(false)
+const queueErrors = ref([])
+let automationTimer
+let disposed = false
+watch(autoEnabled, enabled => localStorage.setItem(AUTO_PROCESSING_PREFERENCE, String(enabled)))
+const categoryCount = key => key === 'ALL' ? emails.value.length : emails.value.filter(email => email.category === key).length
+async function automationStep() {
+  if (disposed) return
+  if (autoEnabled.value && !automationBusy.value && !isVerifying.value) {
+    automationBusy.value = true
+    automationMessage.value = 'Checking the queue / processing an email…'
+    try {
+      const response = await fetch('/api/gemini/process-next', { method: 'POST' })
+      if (!response.ok) throw new Error(`Automatic processing unavailable (HTTP ${response.status}). Check migration and backend configuration.`)
+      const result = await response.json()
+      automationMessage.value = result.state === 'processed' ? `Processed ${result.emailId}. Results saved.` : result.message
+      const list = await fetch('/api/emails')
+      if (list.ok) emails.value = await list.json()
+      const failures = await fetch('/api/gemini/queue-errors')
+      if (failures.ok) queueErrors.value = await failures.json()
+      if (result.emailId === selectedEmailId.value && result.state === 'processed') {
+        if (!reviewNote.value.trim()) await selectEmailById(result.emailId)
+        else reviewError.value = 'New extraction saved. Refresh this email before submitting your review.'
+      }
+    } catch (error) { automationMessage.value = error.message; autoEnabled.value = false }
+    finally { automationBusy.value = false }
+  }
+  if (!disposed) automationTimer = setTimeout(automationStep, 5000)
+}
 const selectedEmailId = ref(null)
 const isVerifying = ref(false)
 const workflow = ref(null)
@@ -16,6 +51,11 @@ const currentDetail = ref(null)
 const isLoadingList = ref(true)
 const isLoadingDetail = ref(false)
 const errorMessage = ref('')
+
+async function errorFrom(response, fallback) {
+  const data = await response.json().catch(() => ({}))
+  return data.message || data.detail || `${fallback} (HTTP ${response.status}).`
+}
 
 async function fetchEmailList() {
   isLoadingList.value = true
@@ -51,13 +91,13 @@ async function selectEmailById(id) {
   isLoadingDetail.value = true
   try {
     const res = await fetch(`/api/emails/${id}`)
-    if (!res.ok) throw new Error(`Could not load email (HTTP ${res.status}).`)
+    if (!res.ok) throw new Error(await errorFrom(res, 'Could not load email'))
     if (res.ok) {
       const detail = await res.json()
       if (selectedEmailId.value !== id) return
       currentDetail.value = detail
       const saved = await fetch(`/api/emails/${id}/workflow`)
-      if (!saved.ok) throw new Error('Could not load saved verification and reviews.')
+      if (!saved.ok) throw new Error(await errorFrom(saved, 'Could not load saved verification and reviews'))
       const data = await saved.json()
       if (selectedEmailId.value === id) workflow.value = data
     }
@@ -83,8 +123,7 @@ const stats = computed(() => {
 
 const filteredEmails = computed(() => {
   return emails.value.filter(email => {
-    const matchesFilter =
-      selectedFilter.value === 'all' || email.status === selectedFilter.value
+    const matchesFilter = (selectedFilter.value === 'all' || email.status === selectedFilter.value) && (selectedCategory.value === 'ALL' || email.category === selectedCategory.value)
     const query = searchQuery.value.trim().toLowerCase()
     if (!query) return matchesFilter
     const matchesSearch =
@@ -110,7 +149,7 @@ async function runVerification() {
     }
     const saved = await response.json()
     const item = emails.value.find(email => email.id === id)
-    if (item) item.status = saved.status
+    if (item) { item.status = saved.workflow_status; item.category = saved.category }
     if (selectedEmailId.value === id) await selectEmailById(id)
   } catch (error) { reviewError.value = error.message }
   finally { isVerifying.value = false }
@@ -144,7 +183,9 @@ async function saveReview(decision) {
 
 onMounted(() => {
   fetchEmailList()
+  automationTimer = setTimeout(automationStep, 1500)
 })
+onUnmounted(() => { disposed = true; clearTimeout(automationTimer) })
 </script>
 
 <template>
@@ -165,7 +206,7 @@ onMounted(() => {
         </div>
         <div class="stat-badge stat-pending">
           <span class="stat-num">{{ stats.pending }}</span>
-          <span class="stat-lbl">Pending Review</span>
+          <span class="stat-lbl">Unprocessed</span>
         </div>
         <div class="stat-badge stat-discrepancy">
           <span class="stat-num">{{ stats.discrepancy }}</span>
@@ -177,6 +218,16 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <section class="automation-bar" aria-label="Automatic verification">
+      <label><input v-model="autoEnabled" type="checkbox" /> Automatically process unverified emails</label>
+      <p role="status">{{ automationMessage }} <span v-if="!autoEnabled && automationBusy">Current request will finish.</span></p>
+      <small>This browser setting is remembered after reload. Exact seven-field matches pass automatically. Every difference requires human review. Similarity percentages are advisory.</small>
+      <details v-if="queueErrors.length"><summary>Processing errors ({{ queueErrors.length }})</summary><p v-for="failure in queueErrors" :key="failure.email_id">{{ failure.email_id }} · {{ failure.attempts }} attempts · {{ failure.last_error }}</p></details>
+    </section>
+    <nav class="category-tabs" aria-label="Email categories">
+      <button v-for="(label, key) in categories" :key="key" type="button" :aria-pressed="selectedCategory === key" :class="{ active: selectedCategory === key }" @click="selectedCategory = key">{{ label }} ({{ categoryCount(key) }})</button>
+    </nav>
 
     <!-- Error Banner -->
     <div v-if="errorMessage" class="error-banner" role="alert">
@@ -235,7 +286,7 @@ onMounted(() => {
               :class="['filter-pill', { active: selectedFilter === 'pending' }]"
               @click="selectedFilter = 'pending'"
             >
-              Pending ({{ stats.pending }})
+              Unprocessed ({{ stats.pending }})
             </button>
             <button
               type="button"
@@ -251,6 +302,8 @@ onMounted(() => {
             >
               Verified ({{ stats.verified }})
             </button>
+            <button type="button" :class="['filter-pill', { active: selectedFilter === 'needs_review' }]" @click="selectedFilter = 'needs_review'">Human review ({{ emails.filter(email => email.status === 'needs_review').length }})</button>
+            <button type="button" :class="['filter-pill', { active: selectedFilter === 'classified' }]" @click="selectedFilter = 'classified'">Classified</button>
           </div>
         </div>
 
@@ -274,10 +327,11 @@ onMounted(() => {
               <span class="email-date">{{ email.date }}</span>
             </div>
             <div class="email-subject">{{ email.subject }}</div>
+            <small class="email-category">{{ categories[email.category] || email.category }}</small>
             <div class="email-meta">
               <span class="booking-tag">{{ email.bookingNo }}</span>
               <span :class="['status-pill', email.status]">
-                {{ email.status === 'verified' ? '✓ Verified' : email.status === 'discrepancy' ? '⚠ Discrepancy' : '⏳ Pending' }}
+                {{ statusLabels[email.status] || email.status }}
               </span>
             </div>
           </li>
@@ -309,10 +363,11 @@ onMounted(() => {
             <div class="detail-tags">
               <span class="booking-tag-lg">Booking: {{ currentDetail.bookingNo }}</span>
               <span :class="['status-pill-lg', currentDetail.status]">
-                {{ currentDetail.status === 'verified' ? 'Verified & Matched' : currentDetail.status === 'discrepancy' ? 'Discrepancy Detected' : 'Pending Verification' }}
+                {{ statusLabels[currentDetail.status] || currentDetail.status }}
               </span>
             </div>
             <h2>{{ currentDetail.subject }}</h2>
+            <p><strong>Category:</strong> {{ categories[workflow?.category] || 'Loading…' }}</p>
             <div class="sender-info">
               <strong>From:</strong> {{ currentDetail.senderName }} &lt;{{ currentDetail.sender }}&gt; • <span>{{ currentDetail.date }}</span>
             </div>
@@ -328,11 +383,11 @@ onMounted(() => {
               {{ isVerifying ? 'Processing…' : 'Run Verification' }}
             </button>
 
-            <div class="flag-approve-btn-group">
+            <div v-if="workflow?.category === 'BL_COMPARISON'" class="flag-approve-btn-group">
               <button
                 type="button"
                 class="btn-approve"
-                :disabled="isVerifying || !workflow || !reviewer.trim() || !reviewNote.trim() || currentDetail.fields.some(field => field.status === 'pending')"
+                :disabled="isVerifying || !workflow || !reviewer.trim() || !reviewNote.trim() || !workflow.assessment || workflow.assessment.status === 'NEEDS_REVIEW' || currentDetail.fields.some(field => field.status === 'pending')"
                 @click="saveReview('APPROVE')"
               >
                 ✓ Approve
@@ -349,8 +404,8 @@ onMounted(() => {
           </div>
         </div>
 
-        <section class="review-persistence" aria-label="Human review">
-          <p v-if="reviewError" role="alert">{{ reviewError }}</p>
+        <p v-if="reviewError" class="error-banner" role="alert">{{ reviewError }}</p>
+        <section v-if="workflow?.category === 'BL_COMPARISON'" class="review-persistence" aria-label="Human review">
           <p v-if="isVerifying" role="status">Processing request…</p>
           <label>Your name (self-reported)<input v-model="reviewer" maxlength="200" placeholder="Reviewer name" /></label>
           <label>Review note<textarea v-model="reviewNote" maxlength="4000" placeholder="Explain your approval or flag" /></label>
@@ -371,10 +426,10 @@ onMounted(() => {
             <a
               v-for="(att, i) in currentDetail.attachments"
               :key="i"
-              :href="'/api/emails/' + currentDetail.id + '/attachments/' + att.name"
+              :href="'/api/emails/' + currentDetail.id + '/attachments/' + encodeURIComponent(att.name)"
               target="_blank"
               class="attachment-chip attachment-link"
-              :title="'Click to view or download ' + att.name"
+              :title="'Click to view or download ' + encodeURIComponent(att.name)"
             >
               <span class="att-type" :class="att.type">{{ att.type }}</span>
               <span class="att-name">{{ att.name }}</span>
@@ -383,16 +438,29 @@ onMounted(() => {
           </div>
         </div>
 
+        <section v-if="workflow?.assessment" class="assessment-card" aria-label="Saved AI assessment">
+          <h3>{{ statusLabels[currentDetail.status] }}</h3>
+          <p>{{ workflow.assessment.explanation }}</p>
+          <p v-if="workflow.assessment.reviewReason"><strong>Review reason:</strong> {{ workflow.assessment.reviewReason }}</p>
+          <p v-if="workflow.category === 'BL_COMPARISON'"><strong>{{ workflow.assessment.status === 'OK' ? 'Exact field match' : 'AI-estimated match' }}:</strong> {{ workflow.assessment.matchPercentage == null ? 'Unavailable' : workflow.assessment.matchPercentage + '%' }}</p>
+          <p v-if="workflow.assessment.status === 'MISMATCH'">Different fields: {{ workflow.assessment.defectFields.join(', ') }}. A high percentage does not mean approval.</p>
+        </section>
+        <p v-else class="assessment-card">Waiting for automatic processing. You can also use Run Verification.</p>
+
+        <section v-if="workflow?.category === 'SI_REQUEST'" class="assessment-card">
+          <h3>New shipping instruction</h3>
+          <p>No draft BL comparison is required yet. Extracted SI values are saved below.</p>
+          <dl v-for="field in workflow.fields" :key="field.key"><dt>{{ field.key }}</dt><dd>{{ field.si || 'Not supplied' }} <small v-if="field.siEvidence">({{ field.siEvidence }})</small></dd></dl>
+        </section>
+
         <!-- Verification Table: SI vs BL Comparison -->
-        <div class="verification-section">
+        <div v-if="workflow?.category === 'BL_COMPARISON'" class="verification-section">
           <div class="verification-header">
             <div>
               <h3>Shipping Instruction (SI) vs. Draft Bill of Lading (B/L)</h3>
-              <p class="section-desc">Automated field-by-field cross comparison highlighting any discrepancies</p>
+              <p class="section-desc">Exact field comparison. Normalized similarity does not authorize automatic approval.</p>
             </div>
-            <div class="vessel-badge">
-              <span>🚢 Vessel: <strong>{{ currentDetail.vessel }}</strong></span>
-            </div>
+
           </div>
 
           <div class="table-scroll-hint" aria-hidden="true">
@@ -423,7 +491,7 @@ onMounted(() => {
                   </td>
                   <td class="field-value bl-val">
                     {{ field.bl }}
-                    <div v-if="field.note" class="mismatch-note">
+                    <div v-if="field.note" :class="['evidence-note', field.status]">
                       {{ field.note }}
                     </div>
                   </td>
@@ -448,13 +516,24 @@ onMounted(() => {
       </section>
 
       <section v-else class="inbox-detail empty-detail">
-        <p>Select an email from the list to inspect document details.</p>
+        <p v-if="isLoadingDetail" role="status">Loading email details…</p>
+        <template v-else-if="reviewError">
+          <p class="detail-load-error" role="alert">{{ reviewError }}</p>
+          <p>Check the database migrations, then retry this email.</p>
+          <button type="button" class="btn-retry" :disabled="!selectedEmailId" @click="selectEmailById(selectedEmailId)">Retry</button>
+        </template>
+        <p v-else>Select an email from the list to inspect document details.</p>
       </section>
     </div>
   </div>
 </template>
 
 <style scoped>
+.automation-bar, .assessment-card { padding: 16px; background: #f0f5ed; border: 1px solid #ccdcca; border-radius: 12px; margin-bottom: 16px; overflow-wrap: anywhere; }
+.category-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.category-tabs button { padding: 9px 12px; background: white; color: #164f45; border: 1px solid #b7c9bd; }
+.category-tabs button.active { background: #164f45; color: white; }
+
 .review-persistence { margin: 16px 0; padding: 16px; border: 1px solid #dce4de; border-radius: 12px; font-size: 13px; }
 .review-persistence label { display: block; margin: 10px 0; }
 .review-persistence input, .review-persistence textarea { display: block; box-sizing: border-box; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #b7c9bd; border-radius: 6px; font: inherit; }
@@ -480,6 +559,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
 }
+.detail-load-error { color: #943f31; font-weight: 600; }
 
 .btn-retry {
   background: #dc2626;
@@ -1042,12 +1122,15 @@ onMounted(() => {
   color: #1e293b;
 }
 
-.mismatch-note {
+.evidence-note {
   margin-top: 4px;
   font-size: 11px;
-  color: #dc2626;
   font-weight: 500;
 }
+
+.evidence-note.match { color: #111827; }
+.evidence-note.mismatch { color: #dc2626; }
+.evidence-note.pending { color: #92400e; }
 
 .field-badge {
   font-size: 11px;

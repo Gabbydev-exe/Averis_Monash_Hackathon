@@ -8,5 +8,6 @@ public record EmailSummaryDto(
         String date,
         String status,
         String bookingNo,
-        int attachmentsCount
+        int attachmentsCount,
+        String category
 ) {}

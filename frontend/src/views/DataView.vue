@@ -10,6 +10,11 @@ const busy = ref(false)
 const preparing = ref(false)
 const exporting = ref('')
 const fileInput = ref(null)
+const attachmentInput = ref(null)
+const attachmentFiles = ref([])
+const attachmentNames = ref([])
+const createdEmailId = ref(null)
+const uploadedAttachmentNames = ref([])
 const emails = ref([])
 const senderSearch = ref('')
 const selectedIds = ref([])
@@ -42,13 +47,23 @@ async function loadEmails() {
 }
 onMounted(loadEmails)
 const MAX_BYTES = 5 * 1024 * 1024
+const MAX_ATTACHMENTS = 2
 const example = JSON.stringify({ email_id: 'email_new_001', from: 'shipping@example.com', subject: 'Draft BL for review', body: 'Please review the shipping documents.', attachments: [] }, null, 2)
+
+function clearAttachmentSelection() {
+  attachmentFiles.value = []
+  attachmentNames.value = []
+  createdEmailId.value = null
+  uploadedAttachmentNames.value = []
+  if (attachmentInput.value) attachmentInput.value.value = ''
+}
 
 async function chooseFiles(event) {
   records.value = []
   importPayload.value = ''
   result.value = null
   error.value = ''
+  clearAttachmentSelection()
   const files = Array.from(event.target.files || [])
   fileNames.value = files.map(file => file.name)
   if (!files.length) return
@@ -79,6 +94,47 @@ async function chooseFiles(event) {
   finally { preparing.value = false }
 }
 
+function chooseAttachments(event) {
+  error.value = ''
+  const files = Array.from(event.target.files || [])
+  const reject = message => {
+    clearAttachmentSelection()
+    error.value = message
+  }
+  if (!files.length) {
+    clearAttachmentSelection()
+    return
+  }
+  if (records.value.length !== 1) {
+    reject('Choose exactly one new email JSON record before adding document files.')
+    return
+  }
+  if (!Array.isArray(records.value[0].attachments) || records.value[0].attachments.length) {
+    reject('For this workflow, set "attachments": [] in the email JSON. The selected files become the attachment list.')
+    return
+  }
+  if (files.length > MAX_ATTACHMENTS) {
+    reject(`Choose up to ${MAX_ATTACHMENTS} attachments for one email.`)
+    return
+  }
+  const names = new Set()
+  for (const file of files) {
+    if (!/\.(pdf|doc|docx|xlsx|txt)$/i.test(file.name) || !file.size || file.size > MAX_BYTES
+        || /[\\/\u0000-\u001F\u007F]/.test(file.name) || file.name.length > 255) {
+      reject(`${file.name}: choose a PDF, DOC, DOCX, XLSX or UTF-8 TXT file up to 5 MB.`)
+      return
+    }
+    if (names.has(file.name.toLowerCase())) {
+      reject('Attachment filenames must be unique, including upper/lowercase differences.')
+      return
+    }
+    names.add(file.name.toLowerCase())
+  }
+  attachmentFiles.value = files
+  attachmentNames.value = files.map(file => file.name)
+  uploadedAttachmentNames.value = []
+}
+
 async function errorFrom(response) {
   const data = await response.json().catch(() => ({}))
   return data.message || data.detail || `Request failed (HTTP ${response.status}).`
@@ -88,21 +144,41 @@ async function importData() {
   if (!records.value.length || busy.value) return
   busy.value = true
   error.value = ''
-  result.value = null
+  const includesAttachments = attachmentFiles.value.length > 0
+  const emailId = records.value.length === 1 ? records.value[0].email_id : null
   try {
-    const response = await fetch('/api/emails/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: importPayload.value,
-    })
-    if (!response.ok) throw new Error(await errorFrom(response))
-    result.value = await response.json()
+    if (!createdEmailId.value) {
+      const response = await fetch('/api/emails/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: importPayload.value,
+      })
+      if (!response.ok) throw new Error(await errorFrom(response))
+      result.value = await response.json()
+      if (includesAttachments) {
+        if (!result.value.insertedIds?.includes(emailId)) {
+          throw new Error(`Email ${emailId} already exists, so no attachment was uploaded or replaced.`)
+        }
+        createdEmailId.value = emailId
+      }
+    }
+    if (includesAttachments) {
+      for (const file of attachmentFiles.value.filter(file => !uploadedAttachmentNames.value.includes(file.name))) {
+        const response = await fetch(`/api/emails/${encodeURIComponent(createdEmailId.value)}/attachments/${encodeURIComponent(file.name)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file,
+        })
+        if (!response.ok) throw new Error(await errorFrom(response))
+        uploadedAttachmentNames.value.push(file.name)
+      }
+      result.value = { ...result.value, attachmentsUploaded: uploadedAttachmentNames.value.length }
+    }
     records.value = []
     importPayload.value = ''
     fileNames.value = []
     if (fileInput.value) fileInput.value.value = ''
+    clearAttachmentSelection()
     await loadEmails()
   } catch (cause) {
     error.value = cause instanceof TypeError
-      ? 'Connection interrupted. Check the inbox before retrying; existing email IDs are skipped safely.' : cause.message
+      ? 'Connection interrupted. Check whether the email was created before retrying.' : cause.message
   } finally { busy.value = false }
 }
 
@@ -117,17 +193,17 @@ function download(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-async function exportData(format) {
+async function exportData(format, results = true) {
   if (cannotExport.value) return
   exporting.value = format
   error.value = ''
   try {
-    const response = await fetch(`/api/emails/export?format=${format}`, {
+    const response = await fetch(`/api/emails/${results ? 'export-results' : 'export'}?format=${format}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ emailIds: selectedIds.value }),
     })
     if (!response.ok) throw new Error(await errorFrom(response))
-    download(await response.blob(), `shipping-emails.${format}`)
+    download(await response.blob(), `${results ? 'submission' : 'shipping-emails'}.${format}`)
   } catch (cause) { error.value = cause.message || 'Could not export data. Please retry.' }
   finally { exporting.value = '' }
 }
@@ -137,12 +213,13 @@ async function exportData(format) {
   <section class="data-page" aria-labelledby="data-title">
     <p class="eyebrow">EMAIL DATA</p>
     <h1 id="data-title">Import once. Keep your data portable.</h1>
-    <p class="data-intro">Add structured email records directly, or download your saved inbox. This is separate from uploading and reading document files.</p>
+    <p class="data-intro">Import email records and, for one new email at a time, upload its source documents to cloud storage.</p>
 
     <div v-if="error" class="data-alert data-error" role="alert">{{ error }}</div>
     <div v-if="result" class="data-alert data-success" role="status">
       <strong>{{ result.inserted }} imported · {{ result.skipped }} existing records skipped</strong>
       <p>Saved to the database. Existing emails and verification history were preserved.</p>
+      <p v-if="result.attachmentsUploaded">{{ result.attachmentsUploaded }} document attachment(s) saved to cloud storage.</p>
       <router-link to="/inbox">View inbox →</router-link>
     </div>
 
@@ -160,16 +237,26 @@ async function exportData(format) {
           <ul><li v-for="(record, index) in records.slice(0, 3)" :key="index">{{ record.email_id || 'Missing ID' }} — {{ record.subject || 'No subject' }}</li></ul>
           <p v-if="records.length > 3">And {{ records.length - 3 }} more…</p>
         </div>
+        <template v-if="records.length === 1">
+          <label class="data-file-label" for="attachment-files">Source documents for this new email (0–2 files)</label>
+          <input id="attachment-files" ref="attachmentInput" class="data-file" type="file" accept=".pdf,.doc,.docx,.xlsx,.txt" multiple :disabled="busy || preparing || !!createdEmailId" @change="chooseAttachments" />
+          <p class="data-note">Optional. Select up to two PDF, DOC, DOCX, XLSX or UTF-8 TXT files, up to 5 MB each. Use Ctrl-click in the file picker to select two files together. Keep <code>attachments</code> as <code>[]</code> in this JSON; selected files are linked to this new email.</p>
+          <div v-if="attachmentNames.length" class="data-preview" aria-live="polite">
+            <strong>{{ attachmentNames.length }} attachment(s) selected</strong>
+            <p>{{ attachmentNames.join(', ') }}</p>
+          </div>
+        </template>
+        <p v-else-if="records.length > 1" class="data-note">Batch JSON import supports records only. To add source documents, choose one new email JSON record and its files.</p>
         <button type="button" :disabled="!records.length || busy || preparing || !!exporting" @click="importData">
-          {{ busy ? 'Importing…' : preparing ? 'Reading files…' : 'Import email data' }}
+          {{ busy ? (attachmentFiles.length ? 'Creating email and uploading…' : 'Importing…') : preparing ? 'Reading files…' : attachmentFiles.length ? 'Import email and documents' : 'Import email data' }}
         </button>
-        <p class="data-note">Missing required fields or invalid values reject the whole batch. Blank subject/body text and empty attachment lists are allowed; the sender must not be blank. Attachment paths are references; files are not uploaded and AI verification is not started.</p>
+        <p class="data-note">Existing IDs are never overwritten. If an email ID already exists, its selected documents are not uploaded. New records become eligible for automatic verification after their files are saved.</p>
       </section>
 
       <section class="data-card" aria-labelledby="export-title">
         <span class="data-step">02 / DOWNLOAD RECORDS</span>
         <h2 id="export-title">Export inbox data</h2>
-        <p>Select saved source email records to download, including their attachment references. Exports do not include attachment files or AI verification reports.</p>
+        <p>Select emails to export verification results in the competition format, or download their original source data separately.</p>
         <label class="data-file-label" for="sender-search">Search by sender</label>
         <input id="sender-search" v-model="senderSearch" class="sender-search" type="search" placeholder="Sender name or email address" />
         <div v-if="listError" class="data-error data-alert" role="alert">{{ listError }}</div>
@@ -190,17 +277,22 @@ async function exportData(format) {
         </template>
         <button type="button" class="data-secondary" :disabled="loadingEmails || busy || !!exporting" @click="loadEmails">Refresh email list</button>
         <div class="data-export-actions">
-          <button type="button" :disabled="cannotExport" @click="exportData('json')">{{ exporting === 'json' ? 'Exporting…' : 'Download JSON' }}</button>
-          <button type="button" class="data-secondary" :disabled="cannotExport" @click="exportData('csv')">{{ exporting === 'csv' ? 'Exporting…' : 'Download CSV' }}</button>
+          <button type="button" :disabled="cannotExport" @click="exportData('json')">{{ exporting === 'json' ? 'Exporting…' : 'Download results JSON' }}</button>
+          <button type="button" class="data-secondary" :disabled="cannotExport" @click="exportData('csv')">{{ exporting === 'csv' ? 'Exporting…' : 'Download results CSV' }}</button>
         </div>
-        <p class="data-note"><strong>JSON:</strong> preserves source records and can be imported again.</p>
+        <div class="data-export-actions">
+          <button type="button" class="data-secondary" :disabled="cannotExport" @click="exportData('json', false)">Download source JSON</button>
+          <button type="button" class="data-secondary" :disabled="cannotExport" @click="exportData('csv', false)">Download source CSV</button>
+        </div>
+        <p class="data-note"><strong>Results:</strong> JSON is keyed by email ID with category, status, review_reason, defect_fields and has_defect. Unprocessed selections must finish processing before export. AI percentages and human-review history remain available in the inbox.</p>
+        <p class="data-note"><strong>Source JSON:</strong> preserves source records and can be imported again.</p>
         <p class="data-note"><strong>CSV:</strong> one email per row, with attachment references in a JSON array. Formula-like text is escaped for spreadsheet safety.</p>
       </section>
     </div>
 
     <details class="data-format">
       <summary>View the email JSON format</summary>
-      <p>Required fields: <code>email_id</code>, <code>from</code>, <code>subject</code>, <code>body</code>, and <code>attachments</code>. Use an empty array when there are no attachments.</p>
+      <p>Required fields: <code>email_id</code>, <code>from</code>, <code>subject</code>, <code>body</code>, and <code>attachments</code>. Use <code>[]</code> when selecting source documents on this page.</p>
       <pre>{{ example }}</pre>
       <button type="button" class="data-secondary" @click="download(new Blob([example], { type: 'application/json' }), 'email-example.json')">Download example</button>
     </details>

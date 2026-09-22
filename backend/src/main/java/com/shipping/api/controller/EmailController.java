@@ -72,6 +72,48 @@ public class EmailController {
         return exportResponse(format, records);
     }
 
+    @GetMapping("/export-results")
+    public ResponseEntity<byte[]> exportAllResults(@RequestParam(defaultValue="json") String format) {
+        return exportResultSelection(format, new ExportSelection(emailDataService.getAllEmailSummaries().stream().map(EmailSummaryDto::id).toList()));
+    }
+
+    @PostMapping("/export-results")
+    public ResponseEntity<byte[]> exportResultSelection(@RequestParam(defaultValue="json") String format, @RequestBody ExportSelection selection) {
+        if (selection.emailIds() == null || selection.emailIds().isEmpty() || selection.emailIds().size() > 10000
+                || selection.emailIds().stream().anyMatch(id -> id == null || !id.matches("[A-Za-z0-9_-]{1,64}")))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Select between 1 and 10,000 valid email IDs.");
+        var result = new java.util.LinkedHashMap<String, Object>();
+        for (String id : new java.util.LinkedHashSet<>(selection.emailIds())) {
+            var workflow = emailDataService.workflow(id);
+            var assessment = workflow.assessment();
+            if (assessment == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "Email " + id + " has not been processed since its last update. Finish processing before exporting results.");
+            var record = new java.util.LinkedHashMap<String, Object>();
+            record.put("category", workflow.category());
+            record.put("status", assessment.status());
+            record.put("review_reason", assessment.reviewReason());
+            record.put("defect_fields", assessment.defectFields());
+            record.put("has_defect", assessment.status().equals("MISMATCH"));
+            result.put(id, record);
+        }
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        try {
+            byte[] bytes;
+            if (format.equals("json")) bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(result);
+            else if (format.equals("csv")) {
+                var csv = new StringBuilder("\uFEFFemail_id,category,status,review_reason,defect_fields,has_defect\r\n");
+                for (var entry : result.entrySet()) {
+                    var row = mapper.valueToTree(entry.getValue());
+                    var cells = List.of(entry.getKey(), row.path("category").asText(), row.path("status").asText(), row.path("review_reason").isNull() ? "" : row.path("review_reason").asText(), row.path("defect_fields").toString(), row.path("has_defect").asText());
+                    csv.append(cells.stream().map(value -> "\"" + value.replace("\"", "\"\"") + "\"").collect(java.util.stream.Collectors.joining(","))).append("\r\n");
+                }
+                bytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+            } else throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Export format must be json or csv.");
+            return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"submission." + format + "\"")
+                .contentType(format.equals("json") ? MediaType.APPLICATION_JSON : MediaType.parseMediaType("text/csv;charset=utf-8")).body(bytes);
+        } catch (IOException e) { throw new IllegalStateException("Could not serialize results", e); }
+    }
+
     private ResponseEntity<byte[]> exportResponse(String format, List<com.fasterxml.jackson.databind.JsonNode> records) {
         byte[] data;
         MediaType contentType;
@@ -110,6 +152,16 @@ public class EmailController {
     public com.shipping.api.repository.EmailWorkflow.Snapshot saveReview(@PathVariable String id,
             @RequestBody com.shipping.api.repository.EmailWorkflow.Review input) {
         return emailDataService.saveReview(id, input);
+    }
+
+    @PostMapping(value = "/{id}/attachments/{filename}", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    public ResponseEntity<Void> uploadAttachment(@PathVariable String id, @PathVariable String filename,
+                                                HttpServletRequest request) throws IOException {
+        byte[] bytes = request.getInputStream().readNBytes(EmailJsonData.MAX_BYTES + 1);
+        if (bytes.length > EmailJsonData.MAX_BYTES)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Attachment must be at most 5 MB.");
+        emailDataService.uploadAttachment(id, filename, bytes);
+        return ResponseEntity.noContent().build();
     }
 
     @PutMapping(value = "/{id}/attachments/{filename}", consumes = MediaType.APPLICATION_OCTET_STREAM_VALUE)
@@ -165,7 +217,8 @@ public class EmailController {
 
                     return ResponseEntity.ok()
                             .header(HttpHeaders.CONTENT_TYPE, contentType)
-                            .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                            .header(HttpHeaders.CONTENT_DISPOSITION, org.springframework.http.ContentDisposition.inline().filename(filename, java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                            .header("X-Content-Type-Options", "nosniff")
                             .body(bytes);
                 })
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND).build());
@@ -173,7 +226,8 @@ public class EmailController {
 
     @ExceptionHandler(DataAccessException.class)
     public ResponseEntity<Map<String, String>> databaseUnavailable(DataAccessException exception) {
-        log.warn("Email database query failed ({})", exception.getClass().getSimpleName());
+        Throwable root = exception.getMostSpecificCause();
+        log.warn("Email database query failed ({}): {}", exception.getClass().getSimpleName(), root.getMessage());
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .body(Map.of("status", "unavailable", "message", "Email database is unavailable. Please retry."));

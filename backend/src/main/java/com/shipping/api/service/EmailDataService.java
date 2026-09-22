@@ -42,13 +42,14 @@ public class EmailDataService {
 
     public synchronized List<EmailSummaryDto> getAllEmailSummaries() {
         var statuses = emailRepository.workflow().statuses();
+        var categories = emailRepository.workflow().categories();
             return emailRepository.findAll().stream()
                     .sorted(Comparator.comparingInt((EmailRepository.EmailRow row) -> extractIndex(row.id()))
                             .thenComparing(EmailRepository.EmailRow::id))
                     .map(row -> new EmailSummaryDto(
                             row.id(), row.sender(), extractSenderName(row.sender(), row.body()),
                             row.subject(), "Received", statuses.getOrDefault(row.id(), "pending"),
-                            extractBookingNumber(row.subject(), row.body(), row.id()), row.attachmentCount()))
+                            extractBookingNumber(row.subject(), row.body(), row.id()), row.attachmentCount(), categories.getOrDefault(row.id(), "UNCLASSIFIED")))
                     .toList();
     }
 
@@ -58,7 +59,7 @@ public class EmailDataService {
 
     public synchronized ImportResult importJson(byte[] data) {
         List<JsonNode> records = EmailJsonData.parse(objectMapper, data);
-        int inserted;
+        List<String> insertedIds;
             List<EmailRepository.SourceImport> imports = records.stream().map(email -> {
                 List<EmailRepository.AttachmentImport> attachments = new ArrayList<>();
                 int order = 0;
@@ -68,6 +69,7 @@ public class EmailDataService {
                     String mimeType = switch (filename.substring(filename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT)) {
                         case "txt" -> "text/plain";
                         case "pdf" -> "application/pdf";
+                        case "doc" -> "application/msword";
                         case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
                         case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                         default -> "application/octet-stream";
@@ -78,8 +80,8 @@ public class EmailDataService {
                 }
                 return new EmailRepository.SourceImport(email, attachments);
             }).toList();
-            inserted = emailRepository.insertSourceEmails(imports);
-        return new ImportResult(records.size(), inserted, records.size() - inserted, "database");
+            insertedIds = emailRepository.insertSourceEmails(imports);
+        return new ImportResult(records.size(), insertedIds.size(), records.size() - insertedIds.size(), "database", insertedIds);
     }
 
     public synchronized List<JsonNode> exportSourceEmails() {
@@ -94,17 +96,29 @@ public class EmailDataService {
         catch (java.io.IOException exception) { throw new IllegalStateException("Could not export emails.", exception); }
     }
 
+    public com.shipping.api.repository.VerificationQueue queue() { return emailRepository.queue(); }
+
     public com.shipping.api.repository.EmailWorkflow.Snapshot workflow(String id) { return emailRepository.workflow().read(id); }
     public com.shipping.api.repository.EmailWorkflow.Snapshot saveExtraction(String id, com.shipping.api.repository.EmailWorkflow.Extraction input) { return emailRepository.workflow().saveExtraction(id, input); }
     public com.shipping.api.repository.EmailWorkflow.Snapshot saveReview(String id, com.shipping.api.repository.EmailWorkflow.Review input) { return emailRepository.workflow().saveReview(id, input); }
     public void saveAttachment(String id, String filename, byte[] bytes) { emailRepository.saveAttachmentContent(id, filename, bytes); }
+
+    public void uploadAttachment(String id, String filename, byte[] bytes) {
+        if (filename == null || filename.length() > 255 || filename.contains("/") || filename.contains("\\")
+                || filename.chars().anyMatch(Character::isISOControl)
+                || !filename.toLowerCase(Locale.ROOT).matches(".+\\.(pdf|doc|docx|xlsx|txt)"))
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Choose a PDF, DOC, DOCX, XLSX or TXT attachment with a plain filename.");
+        if (bytes == null || bytes.length == 0 || bytes.length > EmailJsonData.MAX_BYTES)
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.BAD_REQUEST, "Attachment must contain 1 byte to 5 MB.");
+        emailRepository.uploadAttachment(id, filename, bytes);
+    }
 
     private static String sha256(byte[] data) {
         try { return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data)); }
         catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
     }
 
-    public record ImportResult(int received, int inserted, int skipped, String storage) {}
+    public record ImportResult(int received, int inserted, int skipped, String storage, List<String> insertedIds) {}
 
     private EmailDetailDto toDatabaseDetail(EmailRepository.EmailRow row) {
         List<EmailAttachmentDto> attachments = emailRepository.findAttachments(row.id()).stream()
@@ -120,7 +134,7 @@ public class EmailDataService {
             var field = workflow.fields().stream().filter(f -> f.key().equals(key)).findFirst();
             fields.add(field.map(f -> new EmailFieldDto(STANDARD_FIELD_LABELS.get(com.shipping.api.repository.EmailWorkflow.KEYS.indexOf(key)),
                     f.si() == null || f.si().isBlank() ? "Pending" : f.si(), f.bl() == null || f.bl().isBlank() ? "Pending" : f.bl(),
-                    com.shipping.api.repository.EmailWorkflow.fieldStatus(f),
+                    com.shipping.api.repository.EmailWorkflow.fieldStatus(f).equals("pending") ? "pending" : f.si().equals(f.bl()) ? "match" : "mismatch",
                     "SI evidence: " + Objects.toString(f.siEvidence(), "Unavailable") + " | BL evidence: " + Objects.toString(f.blEvidence(), "Unavailable")))
                     .orElseGet(() -> new EmailFieldDto(STANDARD_FIELD_LABELS.get(com.shipping.api.repository.EmailWorkflow.KEYS.indexOf(key)), "Pending", "Pending", "pending", null)));
         }
@@ -166,9 +180,9 @@ public class EmailDataService {
 
     private String detectAttachmentType(String filename) {
         String upper = filename.toUpperCase(Locale.ROOT);
-        if (upper.contains("SI") || upper.contains("SHIPPING_INSTRUCTION")) {
+        if (upper.matches(".*(?:^|[^A-Z])SI(?:[^A-Z]|$).*") || upper.contains("SHIPPING_INSTRUCTION")) {
             return "SI";
-        } else if (upper.contains("BL") || upper.contains("BILL_OF_LADING") || upper.contains("DRAFT")) {
+        } else if (upper.matches(".*(?:^|[^A-Z])BL(?:[^A-Z]|$).*") || upper.contains("BILL_OF_LADING") || upper.contains("DRAFT")) {
             return "BL";
         }
         return "DOC";

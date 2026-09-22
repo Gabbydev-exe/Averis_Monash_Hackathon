@@ -38,7 +38,7 @@ class AttachmentTextReaderTests {
         var result = reader.read("image.png", new byte[]{1, 2, 3});
         assertThat(result.status()).isEqualTo(AttachmentReadStatus.UNSUPPORTED);
         assertThat(result.text()).isNull();
-        assertThat(result.message()).contains(".txt, .pdf, .docx, .xlsx");
+        assertThat(result.message()).contains(".txt, .pdf, .doc, .docx, .xlsx");
     }
 
     @Test

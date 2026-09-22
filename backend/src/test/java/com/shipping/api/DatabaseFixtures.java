@@ -8,7 +8,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 
 final class DatabaseFixtures {
     static void workflow(JdbcTemplate jdbc) {
-        new ResourceDatabasePopulator(new ClassPathResource("db/persistence.sql")).execute(jdbc.getDataSource());
+        new ResourceDatabasePopulator(new ClassPathResource("db/persistence.sql"), new ClassPathResource("db/automation.sql"), new ClassPathResource("db/gcs.sql")).execute(jdbc.getDataSource());
     }
     static void schema(JdbcTemplate jdbc) {
         jdbc.execute("CREATE TABLE emails (email_id VARCHAR(64) PRIMARY KEY, sender_address VARCHAR(320) NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, raw_email CLOB NOT NULL)");
