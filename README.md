@@ -9,6 +9,8 @@ Shipping operations teams receive large volumes of unstructured email. They must
 
 Ship AI Verifier turns that manual workflow into a persistent cloud application. Users import email data and source documents, Gemini classifies and extracts them, deterministic rules compare seven shipment fields, and reviewers inspect evidence before exporting competition results.
 
+##LINK: https://hackathon-509104.web.app
+
 ## Current feature set
 
 ### Import and persistent storage
